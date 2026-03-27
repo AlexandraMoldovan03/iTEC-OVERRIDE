@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "MuralWar",
+    "slug": "muralwar",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": ["**/*"],
+    "scheme": "muralwar",
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "io.muralwar.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow MuralWar to access your camera to scan poster QR codes."
+      }
+    },
+    "android": {
+      "package": "io.muralwar.app",
+      "permissions": ["CAMERA"]
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
