@@ -1,7 +1,7 @@
 /**
  * app/(auth)/team-select.tsx
  * Team selection during onboarding. Receives credentials via params from register.tsx.
- * On confirm: calls register and lets route guard redirect to home.
+ * On confirm: calls register and redirects explicitly to home/tabs on success.
  */
 
 import React, { useState } from 'react';
@@ -10,8 +10,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
@@ -23,16 +21,49 @@ import { Button, ScreenContainer } from '../../src/components/ui';
 import { Colors, Spacing, Radius, Typography } from '../../src/theme';
 
 export default function TeamSelectScreen() {
-  const params = useLocalSearchParams<{ username: string; email: string; password: string }>();
+  const params = useLocalSearchParams<{
+    username?: string | string[];
+    email?: string | string[];
+    password?: string | string[];
+  }>();
+
   const { register, isLoading, error } = useAuthStore();
   const router = useRouter();
 
   const [selectedTeam, setSelectedTeam] = useState<TeamId | null>(null);
+  const [localError, setLocalError] = useState<string>('');
+
+  const getParamValue = (value?: string | string[]) => {
+    if (Array.isArray(value)) return value[0] ?? '';
+    return value ?? '';
+  };
 
   const handleJoin = async () => {
-    if (!selectedTeam) return;
-    await register(params.username, params.email, params.password, selectedTeam);
-    // Route guard in _layout.tsx will redirect to home
+    if (!selectedTeam || isLoading) return;
+
+    setLocalError('');
+
+    const username = getParamValue(params.username).trim();
+    const email = getParamValue(params.email).trim();
+    const password = getParamValue(params.password);
+
+    if (!username || !email || !password) {
+      setLocalError('Missing account details. Please go back and complete registration again.');
+      return;
+    }
+
+    try {
+      await register(username, email, password, selectedTeam);
+
+      const latestError = useAuthStore.getState().error;
+
+      if (!latestError) {
+        router.replace('/(main)/home');
+      }
+    } catch (err) {
+      console.log('Register error:', err);
+      setLocalError('Something went wrong while creating your account.');
+    }
   };
 
   return (
@@ -40,7 +71,8 @@ export default function TeamSelectScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Choose your crew</Text>
         <Text style={styles.subtitle}>
-          Your team colors will mark everything you create.{'\n'}Pick wisely — you can't switch.
+          Your team colors will mark everything you create.{'\n'}
+          Pick wisely — you can&apos;t switch.
         </Text>
       </View>
 
@@ -58,33 +90,45 @@ export default function TeamSelectScreen() {
                 styles.card,
                 isSelected && {
                   borderColor: tc.primary,
-                  backgroundColor: tc.primary + '18',
+                  backgroundColor: `${tc.primary}18`,
                 },
               ]}
             >
-              {/* Selection ring */}
-              <View style={[styles.selectionDot, isSelected && { backgroundColor: tc.primary }]} />
+              <View
+                style={[
+                  styles.selectionDot,
+                  isSelected && {
+                    backgroundColor: tc.primary,
+                    borderColor: tc.primary,
+                  },
+                ]}
+              />
 
               <View style={styles.cardBody}>
-                <Text style={[styles.teamName, { color: tc.primary }]}>{team.name}</Text>
-                <Text style={[styles.tagline, { color: tc.accent }]}>&ldquo;{team.tagline}&rdquo;</Text>
+                <Text style={[styles.teamName, { color: tc.primary }]}>
+                  {team.name}
+                </Text>
+                <Text style={[styles.tagline, { color: tc.accent }]}>
+                  “{team.tagline}”
+                </Text>
                 <Text style={styles.description}>{team.description}</Text>
               </View>
 
-              {/* Color bar */}
               <View style={[styles.colorBar, { backgroundColor: tc.primary }]} />
             </TouchableOpacity>
           );
         })}
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {!!(localError || error) && (
+        <Text style={styles.error}>{localError || error}</Text>
+      )}
 
       <Button
         label="Enter the Arena"
         onPress={handleJoin}
         loading={isLoading}
-        disabled={!selectedTeam}
+        disabled={!selectedTeam || isLoading}
         fullWidth
         style={styles.joinBtn}
       />
