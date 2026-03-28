@@ -28,7 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScanFrame }        from '../src/components/scanner/ScanFrame';
 import { ConfidenceDialog } from '../src/components/scanner/ConfidenceDialog';
-import { matchPosterImage, saveScanRecord, confirmScanRecord } from '../src/services/scanService';
+import { matchPosterImage, saveScanRecord, confirmScanRecord, ERR_BACKEND_OFFLINE } from '../src/services/scanService';
 import { useHaptics }       from '../src/hooks/useHaptics';
 import {
   ScanPhase,
@@ -48,7 +48,7 @@ import { posterService } from '../src/services/posterService';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const AUTO_RESET_FAILED_MS = 2200;
-const AUTO_RESET_ERROR_MS  = 3000;
+const AUTO_RESET_ERROR_MS  = 5000;   // mai mult timp pt a vedea/apăsa retry
 
 // ─── Main screen ─────────────────────────────────────────────────────────────
 
@@ -63,11 +63,12 @@ export default function ScannerScreen() {
   const cameraRef = useRef<CameraView>(null);
 
   // ── State machine ─────────────────────────────────────────────────────────
-  const [phase,      setPhase]      = useState<ScanPhase>('idle');
-  const [candidates, setCandidates] = useState<ScanCandidate[]>([]);
-  const [showDialog, setShowDialog] = useState(false);
-  const [scanId,     setScanId]     = useState<string | null>(null);
-  const [errorMsg,   setErrorMsg]   = useState<string>('');
+  const [phase,          setPhase]          = useState<ScanPhase>('idle');
+  const [candidates,     setCandidates]     = useState<ScanCandidate[]>([]);
+  const [showDialog,     setShowDialog]     = useState(false);
+  const [scanId,         setScanId]         = useState<string | null>(null);
+  const [errorMsg,       setErrorMsg]       = useState<string>('');
+  const [backendOffline, setBackendOffline] = useState(false);
 
   // Prevent double-captures while a scan is in progress
   const isCapturing = useRef(false);
@@ -94,10 +95,10 @@ export default function ScannerScreen() {
     setPhase('capturing');
 
     try {
-      // 1. Take picture
+      // 1. Take picture — quality 0.55 = ~3x smaller file vs 0.9, suficient pt ORB
       const pic = await cameraRef.current.takePictureAsync({
-        quality:    0.72,
-        skipProcessing: false,
+        quality:        0.55,
+        skipProcessing: true,   // mai rapid, nu rotim/procesăm înainte de trimis
       });
 
       setPhase('processing');
@@ -147,8 +148,17 @@ export default function ScannerScreen() {
 
     } catch (err: any) {
       console.warn('[scanner] capture error:', err?.message ?? err);
-      setErrorMsg(err?.message ?? 'Connection error');
-      setPhase('error');
+
+      // Backend offline → stare specială cu buton Demo Mode
+      if (err?.message === ERR_BACKEND_OFFLINE) {
+        setBackendOffline(true);
+        setPhase('error');
+        setErrorMsg('');
+      } else {
+        setBackendOffline(false);
+        setErrorMsg(err?.message ?? 'Connection error');
+        setPhase('error');
+      }
       await haptics.error();
     } finally {
       isCapturing.current = false;
@@ -226,12 +236,57 @@ export default function ScannerScreen() {
         <View style={styles.backBtn} />
       </View>
 
-      {/* ── Error message strip ────────────────────────────────── */}
+      {/* ── Error / Backend offline strip ──────────────────────── */}
       {phase === 'error' && (
         <View style={styles.errorStrip}>
-          <Text style={styles.errorStripText}>
-            {errorMsg || 'Connection error — try again'}
-          </Text>
+          {backendOffline ? (
+            /* Backend nu răspunde */
+            <>
+              <Text style={styles.errorStripTitle}>⚠️  Backend offline</Text>
+              <Text style={styles.errorStripText}>
+                Nu s-a putut conecta la{'\n'}
+                {process.env.EXPO_PUBLIC_SCAN_API_URL ?? 'server'}
+              </Text>
+              <Text style={styles.errorStripHint}>
+                Pornește serverul:  cd backend &amp;&amp; python main.py
+              </Text>
+              <View style={styles.errorBtnRow}>
+                <TouchableOpacity
+                  style={styles.retryBtn}
+                  onPress={() => { setPhase('idle'); setBackendOffline(false); }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.retryBtnText}>RETRY</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.demoModeBtn}
+                  onPress={() => {
+                    setPhase('idle');
+                    setBackendOffline(false);
+                    // Folosim primul poster mock ca demo rapid
+                    if (MOCK_POSTERS[0]) handleDemo(MOCK_POSTERS[0].id);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.demoModeBtnText}>DEMO MODE</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            /* Altă eroare (timeout etc.) */
+            <>
+              <Text style={styles.errorStripText}>
+                {errorMsg || 'Connection error — try again'}
+              </Text>
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={() => { setPhase('idle'); setErrorMsg(''); }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.retryBtnText}>RETRY</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       )}
 
@@ -389,20 +444,69 @@ const styles = StyleSheet.create({
   // ── Error strip ─────────────────────────────────────────────
   errorStrip: {
     position:        'absolute',
-    top:             '50%',
-    left:            Spacing[6],
-    right:           Spacing[6],
-    backgroundColor: Colors.error + 'CC',
-    borderRadius:    Radius.sm,
-    paddingVertical: Spacing[2],
-    paddingHorizontal: Spacing[4],
+    top:             '30%',
+    left:            Spacing[5],
+    right:           Spacing[5],
+    backgroundColor: 'rgba(20,0,0,0.93)',
+    borderRadius:    Radius.md ?? 12,
+    borderWidth:     1,
+    borderColor:     Colors.error + '88',
+    paddingVertical:   Spacing[4],
+    paddingHorizontal: Spacing[5],
     alignItems:      'center',
+    gap:             Spacing[2],
+  },
+  errorStripTitle: {
+    color:         Colors.white,
+    fontSize:      Typography.fontSizes.base,
+    fontWeight:    Typography.fontWeights.black,
+    textAlign:     'center',
+    letterSpacing: 0.5,
   },
   errorStripText: {
-    color:     Colors.white,
-    fontSize:  Typography.fontSizes.sm,
+    color:      'rgba(255,255,255,0.8)',
+    fontSize:   Typography.fontSizes.sm,
     fontWeight: Typography.fontWeights.semibold,
-    textAlign: 'center',
+    textAlign:  'center',
+    lineHeight: 20,
+  },
+  errorStripHint: {
+    color:      'rgba(255,255,255,0.45)',
+    fontSize:   10,
+    textAlign:  'center',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop:  Spacing[1],
+  },
+  errorBtnRow: {
+    flexDirection: 'row',
+    gap:           Spacing[3],
+    marginTop:     Spacing[2],
+  },
+  retryBtn: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth:     1,
+    borderColor:     'rgba(255,255,255,0.4)',
+    borderRadius:    Radius.full,
+    paddingHorizontal: Spacing[5],
+    paddingVertical:   Spacing[2],
+  },
+  retryBtnText: {
+    color:         Colors.white,
+    fontSize:      Typography.fontSizes.xs,
+    fontWeight:    Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.widest,
+  },
+  demoModeBtn: {
+    backgroundColor: Colors.accentCyan,
+    borderRadius:    Radius.full,
+    paddingHorizontal: Spacing[5],
+    paddingVertical:   Spacing[2],
+  },
+  demoModeBtnText: {
+    color:         '#000',
+    fontSize:      Typography.fontSizes.xs,
+    fontWeight:    Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.widest,
   },
 
   // ── Bottom area ─────────────────────────────────────────────

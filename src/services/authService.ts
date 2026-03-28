@@ -151,24 +151,45 @@ export const authService = {
   },
 
   async restoreSession(): Promise<AuthResult | null> {
-    const { data, error } = await supabase.auth.getSession();
+    try {
+      const { data, error } = await supabase.auth.getSession();
 
-    if (error) {
-      console.log('RESTORE SESSION ERROR:', error);
-      throw error;
+      if (error) {
+        // Refresh token invalid / expirat → curăță sesiunea din storage
+        // și tratează ca "neautentificat" (fără a arunca eroarea mai sus)
+        const msg = error.message?.toLowerCase() ?? '';
+        if (
+          msg.includes('refresh token') ||
+          msg.includes('invalid token') ||
+          msg.includes('token not found') ||
+          msg.includes('jwt expired')
+        ) {
+          await supabase.auth.signOut().catch(() => {});
+          return null;
+        }
+        // Alte erori de rețea/server — le propagăm normal
+        console.log('RESTORE SESSION ERROR:', error);
+        throw error;
+      }
+
+      const session = data.session;
+      if (!session?.user) return null;
+
+      const profileUser = await loadProfile(session.user.id, session.user.email);
+      return { user: profileUser, token: session.access_token ?? null };
+
+    } catch (err: any) {
+      // Orice alt crash neașteptat — tratăm ca "nu ești logat"
+      const msg = String(err?.message ?? '').toLowerCase();
+      if (
+        msg.includes('refresh token') ||
+        msg.includes('invalid token') ||
+        msg.includes('token not found')
+      ) {
+        await supabase.auth.signOut().catch(() => {});
+        return null;
+      }
+      throw err;
     }
-
-    const session = data.session;
-
-    if (!session?.user) {
-      return null;
-    }
-
-    const profileUser = await loadProfile(session.user.id, session.user.email);
-
-    return {
-      user: profileUser,
-      token: session.access_token ?? null,
-    };
   },
 };

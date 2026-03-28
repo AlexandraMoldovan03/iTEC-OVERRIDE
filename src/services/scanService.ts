@@ -22,9 +22,40 @@ import { Platform } from 'react-native';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const SCAN_API_URL = process.env.EXPO_PUBLIC_SCAN_API_URL ?? '';
-const SCAN_TIMEOUT_MS   = 15_000;
-const SCAN_IMAGE_QUALITY = 0.75;  // 0..1, trimis ca metadata (calitatea e setată la capture)
+const SCAN_API_URL        = process.env.EXPO_PUBLIC_SCAN_API_URL ?? '';
+const SCAN_TIMEOUT_MS     = 30_000;  // 30s — backend ORB poate fi lent la prima rulare
+const HEALTH_TIMEOUT_MS   = 4_000;  // pre-check rapid: dacă nu răspunde în 4s → offline
+const SCAN_IMAGE_QUALITY  = 0.55;   // trimis ca metadata; captura e setată cu quality: 0.55
+
+// Eroare specială pentru backend offline (detectat de UI)
+export const ERR_BACKEND_OFFLINE = 'BACKEND_OFFLINE';
+
+/**
+ * Verifică dacă backendul e accesibil. Timeout scurt (4s).
+ * Aruncă ERR_BACKEND_OFFLINE dacă nu poate conecta.
+ */
+async function checkBackendReachable(): Promise<void> {
+  const controller = new AbortController();
+  const timeout    = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${SCAN_API_URL}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) throw new Error(`health ${res.status}`);
+  } catch (err: any) {
+    clearTimeout(timeout);
+    const isNetworkErr = err?.name === 'AbortError'
+      || err?.message?.includes('Network request failed')
+      || err?.message?.includes('Failed to fetch')
+      || err?.message?.includes('fetch');
+    if (isNetworkErr || err?.name === 'AbortError') {
+      throw new Error(ERR_BACKEND_OFFLINE);
+    }
+    throw err;
+  }
+}
 
 // ─── Upload + matching ────────────────────────────────────────────────────────
 
@@ -45,6 +76,10 @@ export async function matchPosterImage(
     console.warn('[scanService] EXPO_PUBLIC_SCAN_API_URL not set — returning demo match');
     return getDemoMatch();
   }
+
+  // ── Pre-check: backendul răspunde? (4s timeout) ────────────
+  // Dacă nu, aruncăm ERR_BACKEND_OFFLINE imediat — nu mai așteptăm 30s
+  await checkBackendReachable();
 
   // ── Build FormData ─────────────────────────────────────────
   const formData = new FormData();

@@ -148,5 +148,15 @@ export function useHaptics() {
     async error() {
       await safeNotification('error');
     },
+
+    /**
+     * Un inamic a început să deseneze pe același poster.
+     * Dublu impact mediu — alert scurt și clar.
+     */
+    async enemyDrawing() {
+      await safeImpact('medium');
+      await delay(80);
+      await safeImpact('medium');
+    },
   };
 }

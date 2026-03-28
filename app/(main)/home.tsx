@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Image,
   ImageBackground,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
@@ -14,7 +15,7 @@ import { useVaultStore } from '../../src/stores/vaultStore';
 import { PosterCard } from '../../src/components/poster/PosterCard';
 import { TeamBadge } from '../../src/components/ui/TeamBadge';
 import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
-import { MOCK_POSTERS } from '../../src/mock/posters';
+import { posterService } from '../../src/services/posterService';
 import { Poster } from '../../src/types/poster';
 import { Colors, Spacing, Typography, Radius } from '../../src/theme';
 import {
@@ -27,21 +28,43 @@ export default function HomeScreen() {
   const user = useAuthStore((s) => s.user);
   const { posters: vaultPosters, loadVault } = useVaultStore();
 
+  const [allPosters, setAllPosters] = useState<Poster[]>([]);
+  const [postersLoading, setPostersLoading] = useState(true);
+
+  // Încarcă toate posterele disponibile din Supabase
+  const fetchAll = useCallback(async () => {
+    setPostersLoading(true);
+    try {
+      const data = await posterService.fetchAll();
+      setAllPosters(data);
+    } catch (e) {
+      console.warn('[home] fetchAll error:', e);
+    } finally {
+      setPostersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    loadVault();
-  }, [loadVault]);
+    fetchAll();
+  }, [fetchAll]);
+
+  // Încarcă vault-ul utilizatorului curent
+  useEffect(() => {
+    if (user?.id) loadVault(user.id);
+  }, [user?.id]);
 
   const handlePosterPress = (poster: Poster) => {
     router.push(`/poster/${poster.id}`);
   };
 
-  const featuredPoster = useMemo(() => MOCK_POSTERS[0], []);
-  const liveCount = MOCK_POSTERS.length;
-  const wallCount = vaultPosters.length;
-  const hotCount = Math.max(1, Math.min(4, Math.floor(MOCK_POSTERS.length / 2)));
+  // Posterul featured = cel mai recent scanat de user, sau primul din toate
+  const featuredPoster = vaultPosters[0] ?? null;
+const liveCount = vaultPosters.length;
+const wallCount = vaultPosters.length;
+const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
 
-  const featuredPosterLabel = featuredPoster
-    ? `POSTER #${featuredPoster.id}`
+  const featuredPosterLabel = featuredPoster?.name
+    ? featuredPoster.name.toUpperCase()
     : 'UNKNOWN POSTER';
 
   return (
@@ -143,7 +166,7 @@ export default function HomeScreen() {
           <View style={styles.sectionHeader}>
             <View style={[styles.sectionDot, { backgroundColor: Colors.accentYellow }]} />
             <Text style={[styles.sectionTitle, { color: Colors.accentYellow }]}>
-              TONIGHT’S SPOTLIGHT
+              {wallCount > 0 ? 'LAST SCANNED' : "TONIGHT'S SPOTLIGHT"}
             </Text>
           </View>
 
@@ -154,7 +177,9 @@ export default function HomeScreen() {
           >
             <View style={styles.spotlightTopRow}>
               <View style={styles.spotlightPill}>
-                <Text style={styles.spotlightPillText}>TRENDING WALL</Text>
+                <Text style={styles.spotlightPillText}>
+                  {wallCount > 0 ? 'YOUR WALL' : 'TRENDING WALL'}
+                </Text>
               </View>
               <Text style={styles.spotlightLive}>LIVE NOW</Text>
             </View>
@@ -163,27 +188,32 @@ export default function HomeScreen() {
               {featuredPosterLabel}
             </Text>
 
-            <Text style={styles.spotlightLocation} numberOfLines={1}>
-              City territory currently under creative pressure
-            </Text>
+            {featuredPoster.location?.label ? (
+              <Text style={styles.spotlightLocation} numberOfLines={1}>
+                📍 {featuredPoster.location.label}
+              </Text>
+            ) : null}
 
             <Text style={styles.spotlightText}>
-              Biggest clash in the city right now. Jump in and help your crew
-              leave the boldest mark on this wall.
+              {wallCount > 0
+                ? 'Reopen your last battle room, continue the artwork, or defend it before another team takes over.'
+                : 'Biggest clash in the city right now. Jump in and help your crew leave the boldest mark on this wall.'}
             </Text>
 
             <View style={styles.spotlightStats}>
               <View style={styles.spotlightStat}>
                 <Text style={styles.spotlightStatLabel}>HEAT</Text>
-                <Text style={styles.spotlightStatValue}>92%</Text>
+                <Text style={styles.spotlightStatValue}>
+                  {Math.round((featuredPoster.territory?.heat ?? 0) * 100)}%
+                </Text>
               </View>
               <View style={styles.spotlightStat}>
                 <Text style={styles.spotlightStatLabel}>MODE</Text>
                 <Text style={styles.spotlightStatValue}>OPEN</Text>
               </View>
               <View style={styles.spotlightStat}>
-                <Text style={styles.spotlightStatLabel}>CREW PRESSURE</Text>
-                <Text style={styles.spotlightStatValue}>HIGH</Text>
+                <Text style={styles.spotlightStatLabel}>YOUR SCANS</Text>
+                <Text style={styles.spotlightStatValue}>{wallCount}</Text>
               </View>
             </View>
           </TouchableOpacity>
@@ -203,19 +233,32 @@ export default function HomeScreen() {
           evolve in real time.
         </Text>
 
-        <FlatList
-          data={MOCK_POSTERS}
-          keyExtractor={(p) => p.id}
-          renderItem={({ item }) => (
-            <PosterCard
-              poster={item}
-              onPress={handlePosterPress}
-              style={styles.card}
-            />
-          )}
-          scrollEnabled={false}
-          contentContainerStyle={styles.listContent}
-        />
+        {postersLoading ? (
+  <ActivityIndicator color={Colors.accentGreen} style={{ marginTop: Spacing[4] }} />
+) : vaultPosters.length === 0 ? (
+  <View style={styles.emptyBattles}>
+    <Text style={styles.emptyBattlesText}>You haven’t scanned any posters yet.</Text>
+    <TouchableOpacity onPress={() => router.push('/scanner')}>
+      <Text style={[styles.emptyBattlesText, { color: Colors.accentCyan, marginTop: 6 }]}>
+        Scan your first poster →
+      </Text>
+    </TouchableOpacity>
+  </View>
+) : (
+  <FlatList
+    data={vaultPosters}
+    keyExtractor={(p) => p.id}
+    renderItem={({ item }) => (
+      <PosterCard
+        poster={item}
+        onPress={handlePosterPress}
+        style={styles.card}
+      />
+    )}
+    scrollEnabled={false}
+    contentContainerStyle={styles.listContent}
+  />
+)}
       </View>
 
       {vaultPosters.length > 0 && (
@@ -272,12 +315,12 @@ export default function HomeScreen() {
 
             <View style={styles.crewStatBox}>
               <Text style={styles.crewStatNumber}>{liveCount}</Text>
-              <Text style={styles.crewStatLabel}>ACTIVE BATTLES</Text>
+              <Text style={styles.crewStatLabel}>LIVE BATTLES</Text>
             </View>
 
             <View style={styles.crewStatBox}>
-              <Text style={styles.crewStatNumber}>A+</Text>
-              <Text style={styles.crewStatLabel}>STYLE RANK</Text>
+              <Text style={styles.crewStatNumber}>{hotCount}</Text>
+              <Text style={styles.crewStatLabel}>HOT ZONES</Text>
             </View>
           </View>
         </View>
@@ -579,6 +622,15 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingTop: Spacing[1],
+  },
+  emptyBattles: {
+    paddingVertical: Spacing[5],
+    alignItems: 'center',
+  },
+  emptyBattlesText: {
+    color: Colors.textMuted,
+    fontSize: Typography.fontSizes.sm,
+    textAlign: 'center',
   },
 
   crewCard: {

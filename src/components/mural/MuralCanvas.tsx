@@ -8,13 +8,15 @@
  *  3. Stroke-ul local activ (preview propriul desen, dashed)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, LayoutChangeEvent } from 'react-native';
 import Svg, { Path, Circle, Text as SvgText, G } from 'react-native-svg';
 import { PosterLayerItem, BrushStrokeItem, StickerItem, TeamStampItem } from '../../types/mural';
 import { RemoteStroke } from '../../stores/posterStore';
 import { useMuralCanvas } from '../../hooks/useMuralCanvas';
 import { usePosterStore } from '../../stores/posterStore';
+import { useAuthStore }   from '../../stores/authStore';
+import { useHaptics }     from '../../hooks/useHaptics';
 import { TEAM_COLORS } from '../../theme/colors';
 import { TeamId } from '../../types/team';
 
@@ -39,6 +41,30 @@ export function MuralCanvas({
   });
 
   const remoteStrokes = usePosterStore((s) => s.remoteStrokes);
+  const currentUser   = useAuthStore((s) => s.user);
+  const haptics       = useHaptics();
+
+  // ── Detectează inamic care începe să deseneze ─────────────
+  // Când apare un strokeId nou în remoteStrokes de la o echipă diferită,
+  // declanșăm vibratia haptic enemyDrawing().
+  const knownStrokeIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const currentIds = Object.keys(remoteStrokes);
+
+    currentIds.forEach((sid) => {
+      if (!knownStrokeIds.current.has(sid)) {
+        // Stroke nou — verifică dacă e inamic (echipă diferită)
+        const stroke = remoteStrokes[sid];
+        if (stroke && currentUser?.teamId && stroke.teamId !== currentUser.teamId) {
+          haptics.enemyDrawing();
+        }
+      }
+    });
+
+    // Actualizează set-ul cu ID-urile active
+    knownStrokeIds.current = new Set(currentIds);
+  }, [remoteStrokes]);
 
   const { activeStroke, onTouchStart, onTouchMove, onTouchEnd } = useMuralCanvas({
     width:   canvasLayout.width,

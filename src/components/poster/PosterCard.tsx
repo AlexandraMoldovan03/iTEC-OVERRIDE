@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ViewStyle,
+  Image,
 } from 'react-native';
 import { Poster } from '../../types/poster';
 import { TeamBadge } from '../ui/TeamBadge';
@@ -46,7 +47,15 @@ export function PosterCard({ poster, onPress, style }: PosterCardProps) {
 
       {/* Thumbnail */}
       <View style={styles.thumb}>
-        <Text style={styles.thumbPlaceholder}>🖼</Text>
+        {poster.referenceImageUrl ? (
+          <Image
+            source={{ uri: poster.referenceImageUrl }}
+            style={styles.thumbImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <Text style={styles.thumbPlaceholder}>🖼</Text>
+        )}
       </View>
 
       {/* Info */}
@@ -93,6 +102,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRightWidth: 1,
     borderRightColor: Colors.border,
+  },
+  thumbImage: {
+    width: '100%',
+    height: '100%',
   },
   thumbPlaceholder: {
     fontSize: 28,
