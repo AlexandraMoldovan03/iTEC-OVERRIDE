@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
   // ── Butoane imagine ────────────────────────────────────────
   imageBtn: {
     width:         '100%',
-    marginBottom:  Spacing[3],
+    marginBottom:  Spacing[0],
     shadowColor:   '#FFFFFF',
     shadowOffset:  { width: 0, height: 0 },
     shadowOpacity: 0.1,
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
   },
   imageBtnImg: {
     width:  '100%',
-    height: 90,
+    height: 150,
   },
   imageBtnFallback: {
     width:           '100%',

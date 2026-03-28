@@ -21,6 +21,7 @@ import { Audio } from 'expo-av';
 const { width } = Dimensions.get('window');
 
 // ── Asset Constants ──────────────────────────────────────────
+const BG_IMAGE = require('../_layout/background2.png'); 
 const SPRAY1 = require('../_layout/spray1.png');
 const SPRAY2 = require('../_layout/spray2.png');
 const SPRAY3 = require('../_layout/spray3.png');
@@ -136,8 +137,14 @@ export default function WelcomeScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
+      <Image 
+      source={BG_IMAGE} 
+      style={styles.backgroundImage} 
+      resizeMode="cover" 
+      />
+
       {/* ── Background doodles ────────────────────────────── */}
-      <Animated.View style={[styles.bgLayer, { opacity: doodleOpacity }]}>
+      <Animated.View style={[styles.backgroundImage, { opacity: doodleOpacity }]}>
         <Text style={[styles.doodle, styles.doodle1]}>✦</Text>
         <Text style={[styles.doodle, styles.doodle2]}>⚡</Text>
         <Text style={[styles.doodle, styles.doodle3]}>★</Text>
@@ -247,8 +254,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 64,
   },
-  bgLayer: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject, 
+    width: '100%',
+    height: '100%',
+    opacity: 1, 
   },
   doodle: {
     position: 'absolute',
