@@ -10,21 +10,21 @@ import { TeamId } from '../types/team';
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; accent: string; glow: string; text: string }> = {
   minimalist: {
-    primary: '#E8E8E8',
-    accent: '#FFFFFF',
+    primary: '#c5e0ff',
+    accent: '#c5e0ff',
     glow: 'rgba(232,232,232,0.5)',
     text: '#000000',
   },
   perfectionist: {
-    primary: '#00CFFF',
-    accent: '#7EEEFF',
-    glow: 'rgba(0,207,255,0.55)',
+    primary: '#f87eb9',
+    accent: '#f87eb9',
+    glow: 'rgba(255, 105, 208, 0.55)',
     text: '#000000',
   },
   chaotic: {
-    primary: '#FF2D55',
-    accent: '#FF6B8A',
-    glow: 'rgba(255,45,85,0.6)',
+    primary: '#38bd55',
+    accent: '#38bd55',
+    glow: 'rgba(88, 255, 107, 0.6)',
     text: '#FFFFFF',
   },
 };

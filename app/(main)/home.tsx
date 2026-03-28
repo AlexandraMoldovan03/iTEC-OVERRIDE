@@ -49,20 +49,16 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
           <View style={styles.headerIdentity}>
-            <Text style={styles.headerEyebrow}>MURAL WAR // CREATIVE TAKEOVER</Text>
+            <Text style={styles.headerEyebrow}>MAKE IT SEEN // CREATIVE TAKEOVER</Text>
             <Text style={styles.headerTitle}>
-              {user?.username?.toUpperCase() ?? 'ARTIST'}
+              Hello, {user?.username?.toUpperCase() ?? 'ARTIST'}
             </Text>
             <Text style={styles.headerSubtitle}>
               Scan real posters. Join live battles. Leave a mark the city remembers.
             </Text>
           </View>
 
-          {user && (
-            <View style={styles.headerBadgeWrap}>
-              <TeamBadge teamId={user.teamId} />
-            </View>
-          )}
+          
         </View>
       </View>
 
@@ -92,14 +88,12 @@ export default function HomeScreen() {
         imageStyle={styles.heroImage}
       >
         <View style={styles.heroOverlay}>
-          <View style={styles.heroBadge}>
-            <Text style={styles.heroBadgeText}>LIVE CITY CANVAS</Text>
-          </View>
+        
 
           <Text style={styles.heroTitle}>SCAN. CREATE. TAKE OVER.</Text>
 
           <Text style={styles.heroSubtitle}>
-            MuralWar turns city posters into shared creative battle zones where
+            Make It Seen turns city posters into shared creative battle zones where
             teams compete with style, speed, and presence.
           </Text>
 
@@ -132,9 +126,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.heroFooterText}>
-            Real posters • Team territory • Live street energy
-          </Text>
+          
         </View>
       </ImageBackground>
 
@@ -312,7 +304,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   headerTitle: {
-    fontSize: Typography.fontSizes['3xl'] + 6,
+    fontSize: Typography.fontSizes['2xl'] + 8,
     fontWeight: Typography.fontWeights.black,
     color: Colors.textPrimary,
     letterSpacing: Typography.letterSpacing.wider,
@@ -323,7 +315,7 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     color: Colors.textMuted,
-    fontSize: Typography.fontSizes.sm,
+    fontSize: Typography.fontSizes.lg,
     lineHeight: 21,
     maxWidth: '92%',
   },
@@ -348,6 +340,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     justifyContent: 'space-between',
+    alignItems: "center"
   },
   statDot: {
     width: 8,
@@ -414,7 +407,7 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     color: 'rgba(255,255,255,0.88)',
-    fontSize: Typography.fontSizes.sm,
+    fontSize: Typography.fontSizes.md,
     lineHeight: 21,
     marginTop: Spacing[2],
     maxWidth: '95%',
@@ -487,9 +480,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     flex: 1,
-    fontSize: Typography.fontSizes.xs,
+    fontSize: Typography.fontSizes.md,
     fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.widest,
+    letterSpacing: Typography.letterSpacing.wider,
     textTransform: 'uppercase',
   },
   sectionDescription: {
