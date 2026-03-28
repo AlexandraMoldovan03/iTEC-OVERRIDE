@@ -1,6 +1,7 @@
 /**
  * src/theme/typography.ts
- * Font sizes, weights, and line heights. Uses system fonts compatible with Expo Go.
+ * Graffiti-inspired type scale — heavy, bold, loud.
+ * Uses system fonts compatible with Expo Go.
  */
 
 export const Typography = {
@@ -14,6 +15,7 @@ export const Typography = {
     '2xl': 28,
     '3xl': 36,
     '4xl': 48,
+    '5xl': 64,
   },
   fontWeights: {
     regular: '400' as const,
@@ -23,15 +25,16 @@ export const Typography = {
     black: '900' as const,
   },
   lineHeights: {
-    tight: 1.2,
+    tight: 1.1,
     normal: 1.5,
     relaxed: 1.75,
   },
   letterSpacing: {
     tight: -0.5,
     normal: 0,
-    wide: 1,
-    wider: 2,
-    widest: 4,
+    wide: 1.5,
+    wider: 3,
+    widest: 5,
+    spray: 8,  // extra dramatic — for hero titles
   },
 };

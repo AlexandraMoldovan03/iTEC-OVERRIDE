@@ -64,16 +64,24 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: Spacing[4],
     paddingTop: Spacing[6],
-    paddingBottom: Spacing[4],
+    paddingBottom: Spacing[5],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    marginBottom: Spacing[1],
   },
   title: {
     fontSize: Typography.fontSizes['2xl'],
     fontWeight: Typography.fontWeights.black,
     color: Colors.textPrimary,
+    letterSpacing: Typography.letterSpacing.wider,
+    textTransform: 'uppercase',
   },
   subtitle: {
-    fontSize: Typography.fontSizes.sm,
+    fontSize: Typography.fontSizes.xs,
     color: Colors.textMuted,
+    letterSpacing: Typography.letterSpacing.widest,
+    textTransform: 'uppercase',
+    marginTop: 2,
   },
   list: {
     paddingHorizontal: Spacing[4],

@@ -14,9 +14,9 @@ interface HeatBarProps {
 }
 
 function getHeatColor(heat: number): string {
-  if (heat > 70) return '#FF3D00';
-  if (heat > 40) return '#FFD740';
-  return '#00E676';
+  if (heat > 70) return '#FF2D55';   // neon red-pink
+  if (heat > 40) return '#FFE600';   // caution yellow
+  return '#39FF14';                   // toxic green
 }
 
 export function HeatBar({ heat, style, showLabel = true }: HeatBarProps) {
@@ -55,9 +55,9 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.wide,
   },
   track: {
-    height: 4,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.full,
+    height: 3,
+    backgroundColor: Colors.bgSurface,
+    borderRadius: 2,
     overflow: 'hidden',
   },
   fill: {

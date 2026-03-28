@@ -1,6 +1,6 @@
 /**
  * src/components/ui/TextInput.tsx
- * Styled text input for forms (login, register).
+ * Graffiti-styled text input — wall-tag aesthetic, neon focus glow.
  */
 
 import React, { useState } from 'react';
@@ -30,7 +30,9 @@ export function AppTextInput({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? (
+        <Text style={[styles.label, focused && styles.labelFocused]}>{label}</Text>
+      ) : null}
       <RNTextInput
         {...props}
         onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
@@ -43,7 +45,7 @@ export function AppTextInput({
         ]}
         placeholderTextColor={Colors.textMuted}
       />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text style={styles.error}>⚠ {error}</Text> : null}
     </View>
   );
 }
@@ -53,33 +55,45 @@ const styles = StyleSheet.create({
     marginBottom: Spacing[4],
   },
   label: {
-    fontSize: Typography.fontSizes.sm,
-    fontWeight: Typography.fontWeights.medium,
-    color: Colors.textSecondary,
-    marginBottom: Spacing[1],
-    letterSpacing: Typography.letterSpacing.wide,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.textMuted,
+    marginBottom: Spacing[1] + 2,
+    letterSpacing: Typography.letterSpacing.widest,
     textTransform: 'uppercase',
   },
+  labelFocused: {
+    color: Colors.accentPurple,
+  },
   input: {
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1.5,
     borderColor: Colors.border,
-    borderRadius: Radius.md,
+    borderRadius: Radius.sm,
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[3],
     color: Colors.textPrimary,
     fontSize: Typography.fontSizes.base,
-    minHeight: 48,
+    fontWeight: Typography.fontWeights.medium,
+    minHeight: 52,
   },
   inputFocused: {
-    borderColor: Colors.borderFocus,
+    borderColor: Colors.accentPurple,
+    backgroundColor: Colors.bgCard,
+    shadowColor: Colors.accentPurple,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   inputError: {
     borderColor: Colors.error,
   },
   error: {
-    fontSize: Typography.fontSizes.sm,
+    fontSize: Typography.fontSizes.xs,
     color: Colors.error,
     marginTop: Spacing[1],
+    fontWeight: Typography.fontWeights.bold,
+    letterSpacing: Typography.letterSpacing.wide,
   },
 });

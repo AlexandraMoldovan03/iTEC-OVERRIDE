@@ -1,7 +1,7 @@
 /**
  * src/theme/colors.ts
- * Central color palette. Team colors live here alongside global UI tokens.
- * Import from src/theme/index.ts in components.
+ * Graffiti-inspired neon palette — dark walls, electric ink.
+ * Team colors live here alongside global UI tokens.
  */
 
 import { TeamId } from '../types/team';
@@ -10,21 +10,21 @@ import { TeamId } from '../types/team';
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; accent: string; glow: string; text: string }> = {
   minimalist: {
-    primary: '#E0E0E0',
+    primary: '#E8E8E8',
     accent: '#FFFFFF',
-    glow: 'rgba(255,255,255,0.6)',
-    text: '#111111',
+    glow: 'rgba(232,232,232,0.5)',
+    text: '#000000',
   },
   perfectionist: {
-    primary: '#4A90E2',
-    accent: '#7BB8F5',
-    glow: 'rgba(74,144,226,0.6)',
-    text: '#FFFFFF',
+    primary: '#00CFFF',
+    accent: '#7EEEFF',
+    glow: 'rgba(0,207,255,0.55)',
+    text: '#000000',
   },
   chaotic: {
-    primary: '#FF3D00',
-    accent: '#FF8A65',
-    glow: 'rgba(255,61,0,0.7)',
+    primary: '#FF2D55',
+    accent: '#FF6B8A',
+    glow: 'rgba(255,45,85,0.6)',
     text: '#FFFFFF',
   },
 };
@@ -32,33 +32,44 @@ export const TEAM_COLORS: Record<TeamId, { primary: string; accent: string; glow
 // ─── Global UI Palette ────────────────────────────────────────────────────────
 
 export const Colors = {
-  // Backgrounds
-  bg: '#0A0A0F',
-  bgSurface: '#13131A',
-  bgCard: '#1C1C28',
-  bgOverlay: 'rgba(0,0,0,0.7)',
+  // Backgrounds — pure black walls
+  bg: '#000000',
+  bgSurface: '#0A0A0A',
+  bgCard: '#111111',
+  bgOverlay: 'rgba(0,0,0,0.82)',
 
   // Text
   textPrimary: '#FFFFFF',
-  textSecondary: '#9A9AB0',
-  textMuted: '#55556A',
+  textSecondary: '#AAAAAA',
+  textMuted: '#555555',
 
   // Borders
-  border: '#2A2A3D',
-  borderFocus: '#5555AA',
+  border: '#222222',
+  borderFocus: '#A855F7',
+  borderBright: '#333333',
 
-  // Accents
-  accentPurple: '#7C5CBF',
-  accentPink: '#E040FB',
-  accentGreen: '#00E676',
+  // Neon Accents — spray can palette
+  accentPurple: '#A855F7',      // electric violet
+  accentPurpleDim: '#7C3AED',   // deeper violet
+  accentPink: '#FF1CF7',        // hot magenta
+  accentGreen: '#39FF14',       // toxic neon green
+  accentCyan: '#00FFFF',        // ice blue
+  accentYellow: '#FFE600',      // caution yellow
+  accentOrange: '#FF6B00',      // fire orange
+
+  // Glow versions (for shadow/glow effects)
+  glowPurple: 'rgba(168,85,247,0.4)',
+  glowPink: 'rgba(255,28,247,0.35)',
+  glowGreen: 'rgba(57,255,20,0.35)',
+  glowCyan: 'rgba(0,255,255,0.3)',
 
   // Status
-  success: '#00E676',
-  warning: '#FFD740',
-  error: '#FF1744',
-  info: '#40C4FF',
+  success: '#39FF14',
+  warning: '#FFE600',
+  error: '#FF2D55',
+  info: '#00CFFF',
 
-  // Transparent
+  // Basics
   transparent: 'transparent',
   white: '#FFFFFF',
   black: '#000000',

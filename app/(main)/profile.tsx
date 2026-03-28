@@ -1,10 +1,10 @@
 /**
  * app/(main)/profile.tsx
- * User profile screen. Shows stats, team affiliation, and settings.
+ * Artist profile — graffiti tag identity card, neon team glow.
  */
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useVaultStore } from '../../src/stores/vaultStore';
@@ -35,32 +35,60 @@ export default function ProfileScreen() {
 
   return (
     <ScreenContainer scrollable padded>
-      {/* Avatar & identity */}
+      {/* ── Artist Identity ─────────────────────────────── */}
       <View style={styles.heroSection}>
-        <View style={[styles.avatar, { borderColor: tc.primary, shadowColor: tc.primary }]}>
-          <Text style={styles.avatarText}>{user.username[0].toUpperCase()}</Text>
+        {/* Avatar with team color border + glow */}
+        <View
+          style={[
+            styles.avatar,
+            {
+              borderColor: tc.primary,
+              shadowColor: tc.glow,
+            },
+          ]}
+        >
+          <Text style={[styles.avatarText, { color: tc.primary }]}>
+            {user.username[0].toUpperCase()}
+          </Text>
         </View>
-        <Text style={[styles.username, { color: tc.primary }]}>{user.username}</Text>
+
+        <Text style={[styles.username, { color: tc.primary }]}>
+          {user.username.toUpperCase()}
+        </Text>
         <Text style={styles.email}>{user.email}</Text>
         <TeamBadge teamId={user.teamId} style={styles.teamBadge} />
       </View>
 
-      {/* Team flavour */}
+      {/* ── Team card ────────────────────────────────────── */}
       {team && (
-        <View style={[styles.teamCard, { borderColor: tc.primary + '55', backgroundColor: tc.primary + '11' }]}>
-          <Text style={[styles.teamCardTitle, { color: tc.primary }]}>{team.name}</Text>
-          <Text style={[styles.teamTagline, { color: tc.accent }]}>&ldquo;{team.tagline}&rdquo;</Text>
+        <View
+          style={[
+            styles.teamCard,
+            {
+              borderColor: tc.primary + '55',
+              backgroundColor: tc.primary + '0D',
+              shadowColor: tc.glow,
+            },
+          ]}
+        >
+          <View style={[styles.teamColorBar, { backgroundColor: tc.primary }]} />
+          <Text style={[styles.teamCardTitle, { color: tc.primary }]}>
+            {team.name}
+          </Text>
+          <Text style={[styles.teamTagline, { color: tc.accent }]}>
+            "{team.tagline}"
+          </Text>
         </View>
       )}
 
-      {/* Stats */}
+      {/* ── Stats ────────────────────────────────────────── */}
       <View style={styles.statsRow}>
-        <StatBox label="Score" value={user.score.toLocaleString()} color={tc.primary} />
-        <StatBox label="Posters" value={user.postersContributed.toString()} color={tc.primary} />
-        <StatBox label="Vault" value={vaultCount.toString()} color={tc.primary} />
+        <StatBox label="Score" value={user.score.toLocaleString()} color={tc.primary} glow={tc.glow} />
+        <StatBox label="Posters" value={user.postersContributed.toString()} color={tc.primary} glow={tc.glow} />
+        <StatBox label="Vault" value={vaultCount.toString()} color={tc.primary} glow={tc.glow} />
       </View>
 
-      {/* Actions */}
+      {/* ── Actions ─────────────────────────────────────── */}
       <View style={styles.actions}>
         <Button
           label="🖼  Open Vault"
@@ -85,9 +113,19 @@ export default function ProfileScreen() {
   );
 }
 
-function StatBox({ label, value, color }: { label: string; value: string; color: string }) {
+function StatBox({
+  label,
+  value,
+  color,
+  glow,
+}: {
+  label: string;
+  value: string;
+  color: string;
+  glow: string;
+}) {
   return (
-    <View style={styles.statBox}>
+    <View style={[styles.statBox, { borderColor: color + '33', shadowColor: glow }]}>
       <Text style={[styles.statValue, { color }]}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -102,52 +140,69 @@ const styles = StyleSheet.create({
     gap: Spacing[2],
   },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 92,
+    height: 92,
+    borderRadius: 4,          // square-ish — graffiti sticker aesthetic
     backgroundColor: Colors.bgCard,
-    borderWidth: 3,
+    borderWidth: 2.5,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.6,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
     marginBottom: Spacing[2],
   },
   avatarText: {
     fontSize: Typography.fontSizes['3xl'],
     fontWeight: Typography.fontWeights.black,
-    color: Colors.textPrimary,
   },
   username: {
-    fontSize: Typography.fontSizes.xl,
+    fontSize: Typography.fontSizes['2xl'],
     fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.wide,
+    letterSpacing: Typography.letterSpacing.wider,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
   },
   email: {
     fontSize: Typography.fontSizes.sm,
     color: Colors.textMuted,
+    letterSpacing: Typography.letterSpacing.normal,
   },
   teamBadge: {
     marginTop: Spacing[1],
   },
   teamCard: {
-    borderRadius: Radius.xl,
+    borderRadius: Radius.sm,
     borderWidth: 1,
     padding: Spacing[4],
     marginBottom: Spacing[6],
     gap: Spacing[1],
     alignItems: 'center',
+    overflow: 'hidden',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  teamColorBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
   },
   teamCardTitle: {
-    fontSize: Typography.fontSizes.lg,
+    fontSize: Typography.fontSizes.base,
     fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.wider,
+    letterSpacing: Typography.letterSpacing.widest,
     textTransform: 'uppercase',
+    marginTop: Spacing[2],
   },
   teamTagline: {
     fontSize: Typography.fontSizes.sm,
     fontStyle: 'italic',
+    fontWeight: Typography.fontWeights.semibold,
   },
   statsRow: {
     flexDirection: 'row',
@@ -157,12 +212,15 @@ const styles = StyleSheet.create({
   statBox: {
     flex: 1,
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.xl,
+    borderRadius: Radius.sm,
     borderWidth: 1,
-    borderColor: Colors.border,
     padding: Spacing[4],
     alignItems: 'center',
     gap: Spacing[1],
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
   },
   statValue: {
     fontSize: Typography.fontSizes.xl,
@@ -171,8 +229,9 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: Typography.fontSizes.xs,
     color: Colors.textMuted,
-    letterSpacing: Typography.letterSpacing.wide,
+    letterSpacing: Typography.letterSpacing.wider,
     textTransform: 'uppercase',
+    fontWeight: Typography.fontWeights.bold,
   },
   actions: {
     gap: Spacing[3],

@@ -1,6 +1,6 @@
 /**
  * src/components/ui/TeamBadge.tsx
- * Small pill/badge showing a team name with its brand color.
+ * Graffiti crew badge — bold tag with glow.
  */
 
 import React from 'react';
@@ -25,7 +25,11 @@ export function TeamBadge({ teamId, size = 'md', style }: TeamBadgeProps) {
       style={[
         styles.badge,
         size === 'sm' ? styles.sm : styles.md,
-        { backgroundColor: teamColor.primary + '33', borderColor: teamColor.primary },
+        {
+          backgroundColor: teamColor.primary + '18',
+          borderColor: teamColor.primary,
+          shadowColor: teamColor.glow,
+        },
         style,
       ]}
     >
@@ -44,27 +48,31 @@ export function TeamBadge({ teamId, size = 'md', style }: TeamBadgeProps) {
 
 const styles = StyleSheet.create({
   badge: {
-    borderWidth: 1,
-    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderRadius: Radius.sm,           // angular — like a sticker tag
     alignSelf: 'flex-start',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 4,
   },
   sm: {
     paddingHorizontal: Spacing[2],
-    paddingVertical: 2,
+    paddingVertical: 3,
   },
   md: {
     paddingHorizontal: Spacing[3],
-    paddingVertical: Spacing[1],
+    paddingVertical: Spacing[1] + 1,
   },
   label: {
-    fontWeight: Typography.fontWeights.bold,
+    fontWeight: Typography.fontWeights.black,
     textTransform: 'uppercase',
-    letterSpacing: Typography.letterSpacing.wide,
+    letterSpacing: Typography.letterSpacing.wider,
   },
   smText: {
     fontSize: Typography.fontSizes.xs,
   },
   mdText: {
-    fontSize: Typography.fontSizes.sm,
+    fontSize: Typography.fontSizes.xs + 1,
   },
 });

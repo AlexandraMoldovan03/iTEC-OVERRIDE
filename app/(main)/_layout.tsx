@@ -1,6 +1,6 @@
 /**
  * app/(main)/_layout.tsx
- * Tab bar layout for authenticated screens.
+ * Tab bar layout — graffiti black bar with neon active state.
  */
 
 import { Tabs } from 'expo-router';
@@ -8,7 +8,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors, Typography } from '../../src/theme';
 import { Platform } from 'react-native';
 
-type IconName = 'home-outline' | 'home' | 'map-outline' | 'map' | 'account-outline' | 'account' | 'archive-outline' | 'archive';
+type IconName =
+  | 'home-outline' | 'home'
+  | 'map-outline' | 'map'
+  | 'account-outline' | 'account'
+  | 'archive-outline' | 'archive';
 
 interface TabIconProps {
   name: IconName;
@@ -37,7 +41,9 @@ export default function MainLayout() {
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarLabelStyle: {
           fontSize: Typography.fontSizes.xs,
-          fontWeight: Typography.fontWeights.medium as any,
+          fontWeight: Typography.fontWeights.black as any,
+          letterSpacing: 1,
+          textTransform: 'uppercase',
         },
       }}
     >

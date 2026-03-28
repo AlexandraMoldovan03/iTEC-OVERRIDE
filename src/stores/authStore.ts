@@ -1,7 +1,6 @@
 /**
  * src/stores/authStore.ts
- * Zustand store for authentication state.
- * Handles login, registration, logout, and session restoration.
+ * Zustand store backed by Supabase auth.
  */
 
 import { create } from 'zustand';
@@ -16,8 +15,13 @@ interface AuthStore {
   isLoading: boolean;
   error: string | null;
 
-  login: (email: string, password: string) => Promise<void>;
-  register: (username: string, email: string, password: string, teamId: TeamId) => Promise<void>;
+  login: (email: string, password: string) => Promise<boolean>;
+  register: (
+    username: string,
+    email: string,
+    password: string,
+    teamId: TeamId
+  ) => Promise<boolean>;
   logout: () => Promise<void>;
   restoreSession: () => Promise<void>;
   clearError: () => void;
@@ -32,38 +36,120 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   login: async (email, password) => {
     set({ isLoading: true, error: null });
+
     try {
       const result = await authService.login({ email, password });
-      set({ user: result.user, token: result.token, isAuthenticated: true, isLoading: false });
+
+      set({
+        user: result.user,
+        token: result.token,
+        isAuthenticated: true,
+        isLoading: false,
+        error: null,
+      });
+
+      return true;
     } catch (e: any) {
-      set({ isLoading: false, error: e.message ?? 'Login failed' });
+      console.log('STORE LOGIN ERROR:', e);
+
+      set({
+        isLoading: false,
+        error: e?.message ?? 'Login failed',
+      });
+
+      return false;
     }
   },
 
   register: async (username, email, password, teamId) => {
     set({ isLoading: true, error: null });
+
     try {
-      const result = await authService.register({ username, email, password, teamId });
-      set({ user: result.user, token: result.token, isAuthenticated: true, isLoading: false });
+      const result = await authService.register({
+        username,
+        email,
+        password,
+        teamId,
+      });
+
+      set({
+        user: result.user,
+        token: result.token,
+        isAuthenticated: true,
+        isLoading: false,
+        error: null,
+      });
+
+      return true;
     } catch (e: any) {
-      set({ isLoading: false, error: e.message ?? 'Registration failed' });
+      console.log('STORE REGISTER ERROR:', e);
+
+      set({
+        isLoading: false,
+        error: e?.message ?? 'Registration failed',
+      });
+
+      return false;
     }
   },
 
   logout: async () => {
-    await authService.logout();
-    set({ user: null, token: null, isAuthenticated: false });
+    set({ isLoading: true, error: null });
+
+    try {
+      await authService.logout();
+
+      set({
+        user: null,
+        token: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null,
+      });
+    } catch (e: any) {
+      console.log('STORE LOGOUT ERROR:', e);
+
+      set({
+        isLoading: false,
+        error: e?.message ?? 'Logout failed',
+      });
+    }
   },
 
   restoreSession: async () => {
-    set({ isLoading: true });
-    const result = await authService.restoreSession();
-    if (result) {
-      set({ user: result.user, token: result.token, isAuthenticated: true, isLoading: false });
-    } else {
-      set({ isLoading: false });
+    try {
+      const result = await authService.restoreSession();
+
+      if (!result) {
+        set({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          error: null,
+        });
+        return;
+      }
+
+      set({
+        user: result.user,
+        token: result.token,
+        isAuthenticated: true,
+        error: null,
+      });
+    } catch (e: any) {
+      console.log('STORE RESTORE SESSION ERROR:', e);
+
+      set({
+        user: null,
+        token: null,
+        isAuthenticated: false,
+        error: null,
+      });
     }
   },
 
   clearError: () => set({ error: null }),
 }));
+
+// onAuthStateChange eliminat — login/register/logout/restoreSession
+// gestionează starea direct, fără race condition cu listener-ul paralel.

@@ -1,17 +1,22 @@
 /**
  * app/(main)/home.tsx
- * Home screen — battle hub. Quick-scan CTA + active poster feed.
+ * Home screen — graffiti battle hub. Neon scan CTA + live poster feed.
  */
 
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useVaultStore } from '../../src/stores/vaultStore';
 import { PosterCard } from '../../src/components/poster/PosterCard';
 import { TeamBadge } from '../../src/components/ui/TeamBadge';
 import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
-import { Button } from '../../src/components/ui/Button';
 import { MOCK_POSTERS } from '../../src/mock/posters';
 import { Poster } from '../../src/types/poster';
 import { Colors, Spacing, Typography, Radius } from '../../src/theme';
@@ -35,50 +40,84 @@ export default function HomeScreen() {
 
   return (
     <ScreenContainer scrollable padded={false}>
-      {/* Header */}
+      {/* ── Header ─────────────────────────────────────── */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hey, {user?.username ?? 'artist'}</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.greeting}>
+            {user?.username?.toUpperCase() ?? 'ARTIST'}
+          </Text>
           <Text style={styles.subGreeting}>The walls are waiting.</Text>
         </View>
         {user && <TeamBadge teamId={user.teamId} />}
       </View>
 
-      {/* Scan CTA */}
+      {/* ── Scan CTA ───────────────────────────────────── */}
       <View style={styles.scanSection}>
-        <TouchableOpacity style={styles.scanBtn} onPress={handleScan} activeOpacity={0.85}>
-          <Text style={styles.scanIcon}>📷</Text>
-          <View>
-            <Text style={styles.scanTitle}>SCAN A POSTER</Text>
-            <Text style={styles.scanSub}>Enter a live mural battle room</Text>
+        <TouchableOpacity
+          style={styles.scanBtn}
+          onPress={handleScan}
+          activeOpacity={0.8}
+        >
+          {/* Left glow bar */}
+          <View style={styles.scanGlowBar} />
+
+          <View style={styles.scanContent}>
+            <Text style={styles.scanIcon}>📷</Text>
+            <View style={styles.scanText}>
+              <Text style={styles.scanTitle}>SCAN A POSTER</Text>
+              <Text style={styles.scanSub}>Enter a live mural battle room</Text>
+            </View>
           </View>
+
           <Text style={styles.scanArrow}>→</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Active battles */}
+      {/* ── Active battles ─────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>🔥  ACTIVE BATTLES</Text>
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionDot} />
+          <Text style={styles.sectionTitle}>ACTIVE BATTLES</Text>
+          <View style={[styles.sectionDot, styles.sectionDotRight]} />
+        </View>
         <FlatList
           data={MOCK_POSTERS}
           keyExtractor={(p) => p.id}
           renderItem={({ item }) => (
-            <PosterCard poster={item} onPress={handlePosterPress} style={styles.card} />
+            <PosterCard
+              poster={item}
+              onPress={handlePosterPress}
+              style={styles.card}
+            />
           )}
           scrollEnabled={false}
           contentContainerStyle={styles.listContent}
         />
       </View>
 
-      {/* Recently visited */}
+      {/* ── Recently visited ───────────────────────────── */}
       {vaultPosters.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⏱  RECENTLY VISITED</Text>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionDot, { backgroundColor: Colors.accentCyan }]} />
+            <Text style={[styles.sectionTitle, { color: Colors.accentCyan }]}>
+              RECENTLY VISITED
+            </Text>
+            <View style={[styles.sectionDot, styles.sectionDotRight, { backgroundColor: Colors.accentCyan }]} />
+          </View>
           {vaultPosters.slice(0, 3).map((p) => (
-            <PosterCard key={p.id} poster={p} onPress={handlePosterPress} style={styles.card} />
+            <PosterCard
+              key={p.id}
+              poster={p}
+              onPress={handlePosterPress}
+              style={styles.card}
+            />
           ))}
         </View>
       )}
+
+      {/* Bottom spacer */}
+      <View style={{ height: Spacing[8] }} />
     </ScreenContainer>
   );
 }
@@ -87,37 +126,77 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingHorizontal: Spacing[4],
     paddingTop: Spacing[6],
-    paddingBottom: Spacing[4],
+    paddingBottom: Spacing[5],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  headerLeft: {
+    gap: 2,
   },
   greeting: {
-    fontSize: Typography.fontSizes.xl,
+    fontSize: Typography.fontSizes['2xl'],
     fontWeight: Typography.fontWeights.black,
     color: Colors.textPrimary,
+    letterSpacing: Typography.letterSpacing.wider,
+    textShadowColor: Colors.accentPurple,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 12,
   },
   subGreeting: {
     fontSize: Typography.fontSizes.sm,
     color: Colors.textMuted,
-    marginTop: 2,
+    letterSpacing: Typography.letterSpacing.wide,
+    textTransform: 'uppercase',
   },
+  // ── Scan CTA ────────────────────────────────────────────
   scanSection: {
     paddingHorizontal: Spacing[4],
-    marginBottom: Spacing[6],
+    paddingTop: Spacing[5],
+    paddingBottom: Spacing[4],
   },
   scanBtn: {
-    backgroundColor: Colors.accentPurple + '22',
+    backgroundColor: Colors.bgCard,
     borderColor: Colors.accentPurple,
-    borderWidth: 1,
-    borderRadius: Radius['2xl'],
+    borderWidth: 1.5,
+    borderRadius: Radius.sm,
     padding: Spacing[4],
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+    shadowColor: Colors.accentPurple,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  scanGlowBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    backgroundColor: Colors.accentPurple,
+    shadowColor: Colors.accentPurple,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+  },
+  scanContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing[3],
+    flex: 1,
+    paddingLeft: Spacing[2],
   },
   scanIcon: {
-    fontSize: 32,
+    fontSize: 28,
+  },
+  scanText: {
+    gap: 2,
   },
   scanTitle: {
     fontSize: Typography.fontSizes.base,
@@ -126,26 +205,45 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.wider,
   },
   scanSub: {
-    fontSize: Typography.fontSizes.sm,
-    color: Colors.textSecondary,
-    marginTop: 2,
+    fontSize: Typography.fontSizes.xs,
+    color: Colors.textMuted,
+    letterSpacing: Typography.letterSpacing.wide,
   },
   scanArrow: {
     fontSize: Typography.fontSizes.xl,
     color: Colors.accentPurple,
-    marginLeft: 'auto',
+    fontWeight: Typography.fontWeights.black,
   },
+  // ── Sections ────────────────────────────────────────────
   section: {
     paddingHorizontal: Spacing[4],
-    marginBottom: Spacing[6],
+    marginBottom: Spacing[4],
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    marginBottom: Spacing[4],
+  },
+  sectionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.accentGreen,
+    shadowColor: Colors.accentGreen,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+  },
+  sectionDotRight: {
+    flex: 0,
   },
   sectionTitle: {
     fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.bold,
-    color: Colors.textMuted,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.accentGreen,
     letterSpacing: Typography.letterSpacing.widest,
-    textTransform: 'uppercase',
-    marginBottom: Spacing[3],
+    flex: 1,
   },
   card: {},
   listContent: {},

@@ -1,8 +1,3 @@
-/**
- * app/index.tsx
- * Entry route that redirects based on auth state.
- */
-
 import React from 'react';
 import { View, Text } from 'react-native';
 import { Redirect } from 'expo-router';
@@ -13,7 +8,14 @@ export default function IndexPage() {
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0A0A0F' }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#0A0A0F',
+        }}
+      >
         <Text style={{ color: 'white' }}>Loading...</Text>
       </View>
     );

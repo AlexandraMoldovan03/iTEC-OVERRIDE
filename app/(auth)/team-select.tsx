@@ -1,21 +1,14 @@
 /**
  * app/(auth)/team-select.tsx
- * Team selection during onboarding. Receives credentials via params from register.tsx.
- * On confirm: calls register and redirects explicitly to home/tabs on success.
+ * Crew selection — graffiti faction cards with neon glow.
  */
 
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
 import { TEAMS } from '../../src/constants/teams';
-import { Team } from '../../src/types/team';
-import { TeamId } from '../../src/types/team';
+import { Team, TeamId } from '../../src/types/team';
 import { TEAM_COLORS } from '../../src/theme/colors';
 import { Button, ScreenContainer } from '../../src/components/ui';
 import { Colors, Spacing, Radius, Typography } from '../../src/theme';
@@ -27,7 +20,7 @@ export default function TeamSelectScreen() {
     password?: string | string[];
   }>();
 
-  const { register, isLoading, error } = useAuthStore();
+  const { register, isLoading, error, clearError } = useAuthStore();
   const router = useRouter();
 
   const [selectedTeam, setSelectedTeam] = useState<TeamId | null>(null);
@@ -41,6 +34,7 @@ export default function TeamSelectScreen() {
   const handleJoin = async () => {
     if (!selectedTeam || isLoading) return;
 
+    clearError();
     setLocalError('');
 
     const username = getParamValue(params.username).trim();
@@ -48,34 +42,37 @@ export default function TeamSelectScreen() {
     const password = getParamValue(params.password);
 
     if (!username || !email || !password) {
-      setLocalError('Missing account details. Please go back and complete registration again.');
+      setLocalError('Date lipsă. Întoarce-te și completează din nou înregistrarea.');
       return;
     }
 
-    try {
-      await register(username, email, password, selectedTeam);
+    const success = await register(username, email, password, selectedTeam);
 
-      const latestError = useAuthStore.getState().error;
+    if (success) {
+      router.replace('/(main)/home');
+      return;
+    }
 
-      if (!latestError) {
-        router.replace('/(main)/home');
-      }
-    } catch (err) {
-      console.log('Register error:', err);
-      setLocalError('Something went wrong while creating your account.');
+    const latestError = useAuthStore.getState().error;
+    if (latestError) {
+      Alert.alert('Registration failed', latestError);
     }
   };
 
   return (
     <ScreenContainer scrollable padded>
+      {/* ── Header ───────────────────────────────────────── */}
       <View style={styles.header}>
-        <Text style={styles.title}>Choose your crew</Text>
+        <Text style={styles.step}>STEP 2 OF 2</Text>
+        <Text style={styles.title}>Choose{'\n'}Your Crew.</Text>
+        <View style={styles.accentLine} />
         <Text style={styles.subtitle}>
-          Your team colors will mark everything you create.{'\n'}
-          Pick wisely — you can&apos;t switch.
+          Your colors mark everything you create.{'\n'}
+          Pick wisely — you can't switch.
         </Text>
       </View>
 
+      {/* ── Team cards ───────────────────────────────────── */}
       <View style={styles.cards}>
         {TEAMS.map((team: Team) => {
           const tc = TEAM_COLORS[team.id as TeamId];
@@ -85,52 +82,82 @@ export default function TeamSelectScreen() {
             <TouchableOpacity
               key={team.id}
               onPress={() => setSelectedTeam(team.id as TeamId)}
-              activeOpacity={0.85}
+              activeOpacity={0.8}
               style={[
                 styles.card,
                 isSelected && {
                   borderColor: tc.primary,
-                  backgroundColor: `${tc.primary}18`,
+                  backgroundColor: `${tc.primary}12`,
+                  shadowColor: tc.glow,
+                  shadowOpacity: 0.6,
+                  shadowRadius: 14,
+                  elevation: 8,
                 },
               ]}
             >
+              {/* Selection indicator */}
               <View
                 style={[
                   styles.selectionDot,
                   isSelected && {
                     backgroundColor: tc.primary,
                     borderColor: tc.primary,
+                    shadowColor: tc.glow,
+                    shadowOpacity: 1,
+                    shadowRadius: 6,
                   },
                 ]}
-              />
+              >
+                {isSelected && <Text style={styles.dotCheck}>✓</Text>}
+              </View>
 
               <View style={styles.cardBody}>
                 <Text style={[styles.teamName, { color: tc.primary }]}>
                   {team.name}
                 </Text>
                 <Text style={[styles.tagline, { color: tc.accent }]}>
-                  “{team.tagline}”
+                  "{team.tagline}"
                 </Text>
                 <Text style={styles.description}>{team.description}</Text>
               </View>
 
-              <View style={[styles.colorBar, { backgroundColor: tc.primary }]} />
+              {/* Glow slash on right edge */}
+              <View
+                style={[
+                  styles.colorBar,
+                  {
+                    backgroundColor: tc.primary,
+                    shadowColor: tc.glow,
+                    shadowOpacity: isSelected ? 1 : 0.4,
+                    shadowRadius: 6,
+                  },
+                ]}
+              />
             </TouchableOpacity>
           );
         })}
       </View>
 
       {!!(localError || error) && (
-        <Text style={styles.error}>{localError || error}</Text>
+        <Text style={styles.error}>⚠ {localError || error}</Text>
       )}
 
       <Button
-        label="Enter the Arena"
+        label="⚡ Enter the Arena"
         onPress={handleJoin}
         loading={isLoading}
         disabled={!selectedTeam || isLoading}
         fullWidth
-        style={styles.joinBtn}
+        style={[
+          styles.joinBtn,
+          selectedTeam && {
+            backgroundColor: TEAM_COLORS[selectedTeam].primary,
+            borderColor: TEAM_COLORS[selectedTeam].primary,
+            shadowColor: TEAM_COLORS[selectedTeam].glow,
+            shadowOpacity: 0.7,
+            shadowRadius: 14,
+          },
+        ]}
       />
     </ScreenContainer>
   );
@@ -142,16 +169,37 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing[6],
     gap: Spacing[2],
   },
+  step: {
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.accentYellow,
+    letterSpacing: Typography.letterSpacing.widest,
+    textTransform: 'uppercase',
+  },
   title: {
-    fontSize: Typography.fontSizes['2xl'],
+    fontSize: Typography.fontSizes['4xl'],
     fontWeight: Typography.fontWeights.black,
     color: Colors.textPrimary,
     letterSpacing: Typography.letterSpacing.tight,
+    lineHeight: Typography.fontSizes['4xl'] * Typography.lineHeights.tight,
+  },
+  accentLine: {
+    height: 3,
+    width: 48,
+    backgroundColor: Colors.accentYellow,
+    borderRadius: 2,
+    marginTop: Spacing[2],
+    shadowColor: Colors.accentYellow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
   },
   subtitle: {
-    fontSize: Typography.fontSizes.base,
-    color: Colors.textSecondary,
-    lineHeight: Typography.fontSizes.base * Typography.lineHeights.relaxed,
+    fontSize: Typography.fontSizes.sm,
+    color: Colors.textMuted,
+    lineHeight: Typography.fontSizes.sm * Typography.lineHeights.relaxed,
+    letterSpacing: Typography.letterSpacing.normal,
+    marginTop: Spacing[1],
   },
   cards: {
     gap: Spacing[4],
@@ -159,23 +207,34 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.xl,
-    borderWidth: 2,
+    borderRadius: Radius.sm,
+    borderWidth: 1.5,
     borderColor: Colors.border,
     padding: Spacing[4],
     flexDirection: 'row',
     alignItems: 'flex-start',
     overflow: 'hidden',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
   },
   selectionDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 2,
     borderColor: Colors.border,
     marginRight: Spacing[3],
     marginTop: 2,
     flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 0 },
+  },
+  dotCheck: {
+    color: Colors.black,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
   },
   cardBody: {
     flex: 1,
@@ -184,13 +243,14 @@ const styles = StyleSheet.create({
   teamName: {
     fontSize: Typography.fontSizes.xl,
     fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.wide,
+    letterSpacing: Typography.letterSpacing.wider,
     textTransform: 'uppercase',
   },
   tagline: {
     fontSize: Typography.fontSizes.sm,
     fontStyle: 'italic',
     marginBottom: Spacing[1],
+    fontWeight: Typography.fontWeights.semibold,
   },
   description: {
     fontSize: Typography.fontSizes.sm,
@@ -201,19 +261,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     right: 0,
-    width: 5,
+    width: 4,
     bottom: 0,
-    borderTopRightRadius: Radius.xl,
-    borderBottomRightRadius: Radius.xl,
+    shadowOffset: { width: 0, height: 0 },
   },
   error: {
     color: Colors.error,
-    fontSize: Typography.fontSizes.sm,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.bold,
     textAlign: 'center',
+    letterSpacing: Typography.letterSpacing.wide,
     marginBottom: Spacing[4],
   },
   joinBtn: {
     marginBottom: Spacing[8],
-    backgroundColor: Colors.accentPurple,
   },
 });

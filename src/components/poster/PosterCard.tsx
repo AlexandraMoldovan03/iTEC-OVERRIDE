@@ -1,6 +1,6 @@
 /**
  * src/components/poster/PosterCard.tsx
- * Card shown in vault/home lists. Displays thumbnail, name, territory info.
+ * Graffiti-style card — dark slab with team color slash accent.
  */
 
 import React from 'react';
@@ -10,12 +10,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ViewStyle,
-  Image,
 } from 'react-native';
 import { Poster } from '../../types/poster';
 import { TeamBadge } from '../ui/TeamBadge';
 import { HeatBar } from '../ui/HeatBar';
 import { Colors, Spacing, Radius, Typography } from '../../theme';
+import { TEAM_COLORS } from '../../theme/colors';
 import { timeAgo } from '../../utils/timeUtils';
 
 interface PosterCardProps {
@@ -26,13 +26,24 @@ interface PosterCardProps {
 
 export function PosterCard({ poster, onPress, style }: PosterCardProps) {
   const { territory } = poster;
+  const teamColor = territory.ownerTeamId
+    ? TEAM_COLORS[territory.ownerTeamId]
+    : null;
 
   return (
     <TouchableOpacity
       onPress={() => onPress(poster)}
-      activeOpacity={0.8}
+      activeOpacity={0.75}
       style={[styles.card, style]}
     >
+      {/* Team color slash — left edge accent */}
+      <View
+        style={[
+          styles.slash,
+          { backgroundColor: teamColor?.primary ?? Colors.borderBright },
+        ]}
+      />
+
       {/* Thumbnail */}
       <View style={styles.thumb}>
         <Text style={styles.thumbPlaceholder}>🖼</Text>
@@ -42,7 +53,9 @@ export function PosterCard({ poster, onPress, style }: PosterCardProps) {
       <View style={styles.info}>
         <Text style={styles.name} numberOfLines={1}>{poster.name}</Text>
         {poster.location && (
-          <Text style={styles.location} numberOfLines={1}>📍 {poster.location.label}</Text>
+          <Text style={styles.location} numberOfLines={1}>
+            📍 {poster.location.label}
+          </Text>
         )}
 
         <View style={styles.row}>
@@ -62,21 +75,27 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.xl,
+    borderRadius: Radius.sm,
     borderWidth: 1,
     borderColor: Colors.border,
     overflow: 'hidden',
     marginBottom: Spacing[3],
   },
+  slash: {
+    width: 4,
+    minHeight: 90,
+  },
   thumb: {
-    width: 80,
+    width: 76,
     height: 90,
     backgroundColor: Colors.bgSurface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: Colors.border,
   },
   thumbPlaceholder: {
-    fontSize: 32,
+    fontSize: 28,
   },
   info: {
     flex: 1,
@@ -87,11 +106,14 @@ const styles = StyleSheet.create({
   name: {
     color: Colors.textPrimary,
     fontSize: Typography.fontSizes.base,
-    fontWeight: Typography.fontWeights.semibold,
+    fontWeight: Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.wide,
+    textTransform: 'uppercase',
   },
   location: {
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSizes.sm,
+    color: Colors.textMuted,
+    fontSize: Typography.fontSizes.xs,
+    letterSpacing: Typography.letterSpacing.normal,
   },
   row: {
     flexDirection: 'row',
@@ -102,6 +124,7 @@ const styles = StyleSheet.create({
   time: {
     color: Colors.textMuted,
     fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.medium,
   },
   heat: {
     marginTop: Spacing[2],
