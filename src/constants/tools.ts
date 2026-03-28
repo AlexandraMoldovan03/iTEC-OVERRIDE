@@ -9,7 +9,7 @@ export const MURAL_TOOLS: MuralTool[] = [
   { id: 'brush',     label: 'Brush',      icon: 'brush' },
   { id: 'spray',     label: 'Spray',      icon: 'spray' },
   { id: 'sticker',   label: 'Sticker',    icon: 'sticker-emoji' },
-  { id: 'gif',       label: 'GIF',        icon: 'gif' },
+  { id: 'gif',       label: 'GIF',        icon: 'animation-play' },
   { id: 'erase',     label: 'Erase',      icon: 'eraser' },
   { id: 'glow',      label: 'Glow',       icon: 'shimmer' },
   { id: 'teamStamp', label: 'Team Stamp', icon: 'seal' },

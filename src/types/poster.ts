@@ -45,4 +45,10 @@ export interface Poster {
   createdAt: string;
   /** Thumbnail image URI (mock local asset or remote URL) */
   thumbnailUri?: string;
+  /**
+   * Public URL of the full-resolution reference image used as the canvas background.
+   * Set this in Supabase → posters.reference_image_url after uploading to Storage.
+   * If absent, a styled placeholder is rendered instead.
+   */
+  referenceImageUrl?: string;
 }

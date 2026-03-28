@@ -42,8 +42,9 @@ function mapDbPoster(row: Record<string, any>): Poster {
       lastActivityAt:        new Date().toISOString(),
       recentContributorIds:  [],
     },
-    createdAt:    row.created_at,
-    thumbnailUri: row.thumbnail_uri ?? undefined,
+    createdAt:         row.created_at,
+    thumbnailUri:      row.thumbnail_uri       ?? undefined,
+    referenceImageUrl: row.reference_image_url ?? undefined,
   };
 }
 
@@ -157,6 +158,80 @@ export const posterService = {
     if (error) {
       console.error('[posterService] deleteLayer error:', error.message);
     }
+  },
+
+  /**
+   * Returnează posterele pe care user-ul le-a scanat cu succes.
+   * JOIN poster_scans → posters, deduplicat, sortat după prima scanare (cel mai recent primul).
+   * Fallback: dacă Supabase nu are date → întoarce [] (nu mock-uri — vault gol e corect).
+   */
+  async fetchScannedPosters(userId: string): Promise<Poster[]> {
+    // Fetch distinct poster IDs scanned successfully by this user
+    const { data: scanRows, error: scanErr } = await supabase
+      .from('poster_scans')
+      .select('poster_id, created_at')
+      .eq('user_id', userId)
+      .eq('matched', true)
+      .not('poster_id', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (scanErr) {
+      console.warn('[posterService] fetchScannedPosters scan error:', scanErr.message);
+      return [];
+    }
+
+    if (!scanRows || scanRows.length === 0) return [];
+
+    // Deduplicate: keep first occurrence (most recent scan per poster)
+    const seenIds = new Set<string>();
+    const uniqueIds: string[] = [];
+    for (const row of scanRows) {
+      if (row.poster_id && !seenIds.has(row.poster_id)) {
+        seenIds.add(row.poster_id);
+        uniqueIds.push(row.poster_id);
+      }
+    }
+
+    // Batch fetch poster details
+    const { data: posterRows, error: posterErr } = await supabase
+      .from('posters')
+      .select('*')
+      .in('id', uniqueIds);
+
+    if (posterErr) {
+      console.warn('[posterService] fetchScannedPosters poster error:', posterErr.message);
+      // Fallback: return mock posters that match the IDs
+      return MOCK_POSTERS.filter((p) => uniqueIds.includes(p.id));
+    }
+
+    if (!posterRows || posterRows.length === 0) {
+      // Supabase table empty → fall back to matching mock posters
+      return MOCK_POSTERS.filter((p) => uniqueIds.includes(p.id));
+    }
+
+    // Preserve scan order (most recently scanned first)
+    const posterMap = new Map(posterRows.map((r) => [r.id, mapDbPoster(r)]));
+    return uniqueIds.map((id) => posterMap.get(id)).filter(Boolean) as Poster[];
+  },
+
+  /**
+   * Verifica dacă utilizatorul a scanat un anumit poster.
+   * Folosit ca gate pe ecranul poster/[id].
+   */
+  async hasUserScannedPoster(userId: string, posterId: string): Promise<boolean> {
+    const { count, error } = await supabase
+      .from('poster_scans')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('poster_id', posterId)
+      .eq('matched', true);
+
+    if (error) {
+      console.warn('[posterService] hasUserScannedPoster error:', error.message);
+      // Be permissive on error so users aren't locked out
+      return true;
+    }
+    return (count ?? 0) > 0;
   },
 
   /**

@@ -13,7 +13,6 @@ import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
 import { TeamBadge } from '../../src/components/ui/TeamBadge';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useVaultStore } from '../../src/stores/vaultStore';
-import { MOCK_POSTERS } from '../../src/mock/posters';
 import { Colors, Spacing, Typography, Radius } from '../../src/theme';
 
 const { width } = Dimensions.get('window');
@@ -87,12 +86,14 @@ export default function WallScreen() {
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
 
   useEffect(() => {
-    loadVault();
-  }, []);
+    if (user?.id) {
+      loadVault(user.id);
+    }
+  }, [user?.id]);
 
+  // Wall shows ONLY scanned posters — no mock fallback
   const rawPosters = useMemo(() => {
-    const source = vaultPosters.length > 0 ? vaultPosters : MOCK_POSTERS;
-    return buildWallPosters(source);
+    return buildWallPosters(vaultPosters);
   }, [vaultPosters]);
 
   const filteredPosters = useMemo(() => {

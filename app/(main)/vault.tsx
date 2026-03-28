@@ -4,9 +4,10 @@
  */
 
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useVaultStore } from '../../src/stores/vaultStore';
+import { useAuthStore }  from '../../src/stores/authStore';
 import { PosterCard } from '../../src/components/poster/PosterCard';
 import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
 import { Button } from '../../src/components/ui/Button';
@@ -15,11 +16,14 @@ import { Colors, Spacing, Typography } from '../../src/theme';
 
 export default function VaultScreen() {
   const router = useRouter();
+  const user   = useAuthStore((s) => s.user);
   const { posters, isLoading, loadVault } = useVaultStore();
 
   useEffect(() => {
-    loadVault();
-  }, []);
+    if (user?.id) {
+      loadVault(user.id);
+    }
+  }, [user?.id]);
 
   const handlePress = (poster: Poster) => {
     router.push(`/poster/${poster.id}`);
@@ -32,7 +36,14 @@ export default function VaultScreen() {
         <Text style={styles.subtitle}>{posters.length} poster{posters.length !== 1 ? 's' : ''} scanned</Text>
       </View>
 
-      {posters.length === 0 ? (
+      {isLoading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator color={Colors.accentPurple} size="large" />
+          <Text style={[styles.emptyText, { marginTop: Spacing[3] }]}>
+            Loading your posters…
+          </Text>
+        </View>
+      ) : posters.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>🖼️</Text>
           <Text style={styles.emptyTitle}>Your vault is empty</Text>

@@ -2,15 +2,19 @@
  * app/poster/[id].tsx
  * Camera poster — arena de battle live.
  *
- * Layout:
+ * SCAN GATE: Un utilizator poate deschide un poster DOAR dacă l-a scanat
+ * în prealabil (are o înregistrare matched=true în poster_scans).
+ * Dacă nu → ecran "Scan this poster first" cu buton către scanner.
+ *
+ * Layout după gate:
  *   [HUD top: poster name + utilizatori online + status live]
- *   [Poster anchor view cu mural canvas overlay]
+ *   [PosterAnchorView — imaginea reală ca canvas + SVG mural overlay]
  *   [Territory panel — colapsabil]
  *   [Tool options row: color picker / sticker picker]
  *   [Bottom toolbar: mural tools]
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -20,23 +24,30 @@ import {
   ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { usePosterRoom } from '../../src/hooks/usePosterRoom';
-import { useMuralToolStore } from '../../src/stores/muralToolStore';
-import { PosterAnchorView } from '../../src/components/poster/PosterAnchorView';
-import { TerritoryPanel } from '../../src/components/poster/TerritoryPanel';
-import { MuralToolbar } from '../../src/components/mural/MuralToolbar';
-import { ColorPicker } from '../../src/components/mural/ColorPicker';
-import { StickerPicker } from '../../src/components/mural/StickerPicker';
-import { LiveIndicator } from '../../src/components/ui/LiveIndicator';
-import { LeaderboardPanel } from '../../src/components/poster/LeaderboardPanel';
-import { Colors, Spacing, Typography, Radius } from '../../src/theme';
-import { TEAM_COLORS } from '../../src/theme/colors';
-import { TeamId } from '../../src/types/team';
-import { OnlineUser } from '../../src/services/wsService';
 import { Image } from 'react-native';
+
+import { usePosterRoom }       from '../../src/hooks/usePosterRoom';
+import { useMuralToolStore }   from '../../src/stores/muralToolStore';
+import { useVaultStore }       from '../../src/stores/vaultStore';
+import { useAuthStore }        from '../../src/stores/authStore';
+import { posterService }       from '../../src/services/posterService';
+
+import { PosterAnchorView }  from '../../src/components/poster/PosterAnchorView';
+import { TerritoryPanel }    from '../../src/components/poster/TerritoryPanel';
+import { MuralToolbar }      from '../../src/components/mural/MuralToolbar';
+import { ColorPicker }       from '../../src/components/mural/ColorPicker';
+import { StickerPicker }     from '../../src/components/mural/StickerPicker';
+import { LiveIndicator }     from '../../src/components/ui/LiveIndicator';
+import { LeaderboardPanel }  from '../../src/components/poster/LeaderboardPanel';
+import { Button }            from '../../src/components/ui/Button';
+
+import { Colors, Spacing, Typography, Radius } from '../../src/theme';
+import { TEAM_COLORS }       from '../../src/theme/colors';
+import { TeamId }            from '../../src/types/team';
+import { OnlineUser }        from '../../src/services/wsService';
 import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
 
-// ─── Avatar utilizator online (cu badge imagine mic + fallback) ───────────────
+// ─── Avatar utilizator online ─────────────────────────────────────────────────
 
 const TEAM_INITIALS: Record<string, string> = {
   minimalist: 'M', perfectionist: 'P', chaotic: 'C',
@@ -75,10 +86,99 @@ function UserAvatar({ user }: { user: OnlineUser }) {
   );
 }
 
+// ─── Scan gate screen ─────────────────────────────────────────────────────────
+
+function ScanGateScreen({ onScan, onBack }: { onScan: () => void; onBack: () => void }) {
+  return (
+    <View style={styles.gateScreen}>
+      <TouchableOpacity onPress={onBack} style={styles.gateBack} hitSlop={12}>
+        <Text style={styles.gateBackText}>← Back</Text>
+      </TouchableOpacity>
+
+      <View style={styles.gateContent}>
+        <Text style={styles.gateIcon}>🔒</Text>
+        <Text style={styles.gateTitle}>Scan this poster{'\n'}to unlock it</Text>
+        <Text style={styles.gateDesc}>
+          Find the real-world poster and scan it with your camera to enter this battle room.
+        </Text>
+        <Button
+          label="Open Scanner"
+          onPress={onScan}
+          style={styles.gateBtn}
+        />
+        <TouchableOpacity onPress={onBack} style={styles.gateCancel}>
+          <Text style={styles.gateCancelText}>Not now</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 // ─── Ecran principal ──────────────────────────────────────────────────────────
+
+// Possible gate states
+type GateState = 'checking' | 'granted' | 'denied';
 
 export default function PosterRoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+
+  const user      = useAuthStore((s) => s.user);
+  const vaultStore = useVaultStore();
+
+  // ── Scan gate ─────────────────────────────────────────────────────────────
+  const [gateState, setGateState] = useState<GateState>('checking');
+
+  useEffect(() => {
+    if (!user?.id || !id) {
+      setGateState('denied');
+      return;
+    }
+
+    // Fast path: check in-memory vault first (instant, no network)
+    if (vaultStore.hasScanned(id)) {
+      setGateState('granted');
+      return;
+    }
+
+    // Slow path: check Supabase (handles case where vault wasn't loaded yet
+    // or user navigated directly via deep link)
+    let cancelled = false;
+    posterService.hasUserScannedPoster(user.id, id).then((scanned) => {
+      if (cancelled) return;
+      setGateState(scanned ? 'granted' : 'denied');
+    });
+
+    return () => { cancelled = true; };
+  }, [id, user?.id]);
+
+  // ── Render gate screens ───────────────────────────────────────────────────
+
+  if (gateState === 'checking') {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={Colors.accentPurple} size="large" />
+        <Text style={styles.loadingText}>Checking access...</Text>
+      </View>
+    );
+  }
+
+  if (gateState === 'denied') {
+    return (
+      <ScanGateScreen
+        onScan={() => router.replace('/scanner')}
+        onBack={() => router.back()}
+      />
+    );
+  }
+
+  // ── Gate passed → render battle room ─────────────────────────────────────
+  return <BattleRoom id={id} />;
+}
+
+// ─── Battle room (renderizat doar după gate) ──────────────────────────────────
+
+function BattleRoom({ id }: { id: string }) {
   const router = useRouter();
 
   const {
@@ -92,8 +192,6 @@ export default function PosterRoomScreen() {
   } = usePosterRoom(id);
 
   const activeTool = useMuralToolStore((s) => s.activeTool);
-
-  // ── Stări de eroare / loading ─────────────────────────────
 
   if (error) {
     return (
@@ -115,7 +213,6 @@ export default function PosterRoomScreen() {
     );
   }
 
-  // Maxim 5 avatare în HUD, restul afișat ca "+N"
   const visibleUsers = onlineUsers.slice(0, 5);
   const extraCount   = Math.max(0, onlineUsers.length - 5);
 
@@ -124,26 +221,19 @@ export default function PosterRoomScreen() {
 
       {/* ── HUD top ──────────────────────────────────────── */}
       <View style={styles.hud}>
-
-        {/* Buton închidere */}
         <TouchableOpacity onPress={() => router.back()} style={styles.hudClose}>
           <Text style={styles.hudCloseText}>✕</Text>
         </TouchableOpacity>
-
-        {/* Titlu poster */}
         <View style={styles.hudCenter}>
           <Text style={styles.hudTitle} numberOfLines={1}>{poster.name}</Text>
         </View>
-
-        {/* Status live */}
         <LiveIndicator connected={wsConnected} style={styles.liveIndicator} />
       </View>
 
-      {/* ── Bandă de utilizatori online ──────────────────── */}
+      {/* ── Bandă utilizatori online ──────────────────────── */}
       {onlineUsers.length > 0 && (
         <View style={styles.presenceBand}>
           <Text style={styles.presenceLabel}>ONLINE NOW</Text>
-
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -152,12 +242,9 @@ export default function PosterRoomScreen() {
             {visibleUsers.map((u) => (
               <View key={u.userId} style={styles.avatarWrap}>
                 <UserAvatar user={u} />
-                <Text style={styles.avatarName} numberOfLines={1}>
-                  {u.username}
-                </Text>
+                <Text style={styles.avatarName} numberOfLines={1}>{u.username}</Text>
               </View>
             ))}
-
             {extraCount > 0 && (
               <View style={[styles.avatar, styles.avatarExtra]}>
                 <Text style={styles.avatarExtraText}>+{extraCount}</Text>
@@ -167,15 +254,12 @@ export default function PosterRoomScreen() {
         </View>
       )}
 
-      {/* ── Poster + mural canvas ────────────────────────── */}
+      {/* ── Poster canvas ─────────────────────────────────── */}
       <PosterAnchorView poster={poster} layers={isLoadingLayers ? [] : layers} />
 
       {/* ── Panels scrollabili ────────────────────────────── */}
       <View style={styles.panelWrap}>
-        {/* Clasament în timp real */}
         <LeaderboardPanel />
-
-        {/* Territory panel */}
         <TerritoryPanel
           territory={poster.territory}
           wsConnected={wsConnected}
@@ -183,7 +267,7 @@ export default function PosterRoomScreen() {
         />
       </View>
 
-      {/* ── Tool options — contextual ────────────────────── */}
+      {/* ── Tool options contextual ───────────────────────── */}
       <View style={styles.toolOptions}>
         {(activeTool === 'brush' || activeTool === 'spray' || activeTool === 'glow') && (
           <ColorPicker />
@@ -223,10 +307,61 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: Spacing[6],
   },
-  backBtn: { marginTop: Spacing[3] },
+  backBtn:  { marginTop: Spacing[3] },
   backText: { color: Colors.textSecondary, fontSize: Typography.fontSizes.base },
 
-  // ── HUD ──────────────────────────────────────────────────
+  // ── Gate screen ──────────────────────────────────────────────
+  gateScreen: {
+    flex: 1,
+    backgroundColor: Colors.bg,
+    paddingTop: 56,
+    paddingHorizontal: Spacing[5],
+  },
+  gateBack: {
+    marginBottom: Spacing[4],
+  },
+  gateBackText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.base,
+  },
+  gateContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing[4],
+    paddingBottom: Spacing[16],
+  },
+  gateIcon: {
+    fontSize: 56,
+  },
+  gateTitle: {
+    fontSize: Typography.fontSizes['2xl'],
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+    letterSpacing: Typography.letterSpacing.wide,
+    lineHeight: Typography.fontSizes['2xl'] * 1.3,
+  },
+  gateDesc: {
+    fontSize: Typography.fontSizes.base,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: Typography.fontSizes.base * 1.6,
+    maxWidth: 280,
+  },
+  gateBtn: {
+    marginTop: Spacing[2],
+    paddingHorizontal: Spacing[8],
+  },
+  gateCancel: {
+    paddingVertical: Spacing[2],
+  },
+  gateCancelText: {
+    color: Colors.textMuted,
+    fontSize: Typography.fontSizes.sm,
+  },
+
+  // ── HUD ──────────────────────────────────────────────────────
   hud: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -258,7 +393,7 @@ const styles = StyleSheet.create({
   },
   liveIndicator: { flexShrink: 0 },
 
-  // ── Presence band ─────────────────────────────────────────
+  // ── Presence band ─────────────────────────────────────────────
   presenceBand: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -275,7 +410,6 @@ const styles = StyleSheet.create({
     color: Colors.accentGreen,
     letterSpacing: Typography.letterSpacing.widest,
     flexShrink: 0,
-    // Punctul pulsant de "live"
     textShadowColor: Colors.accentGreen,
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 6,
@@ -292,7 +426,7 @@ const styles = StyleSheet.create({
   avatar: {
     width:          36,
     height:         36,
-    borderRadius:   18,           // circular — badge rotund
+    borderRadius:   18,
     borderWidth:    1.5,
     alignItems:     'center',
     justifyContent: 'center',
@@ -325,7 +459,7 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // ── Restul ───────────────────────────────────────────────
+  // ── Restul ───────────────────────────────────────────────────
   panelWrap: {
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[3],

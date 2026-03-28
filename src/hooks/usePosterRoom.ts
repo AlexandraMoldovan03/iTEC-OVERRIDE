@@ -11,7 +11,7 @@ import { useWebSocket } from './useWebSocket';
 
 export function usePosterRoom(posterId: string) {
   const { openPoster, closePoster, poster } = usePosterStore();
-  const addToVault = useVaultStore((s) => s.addToVault);
+  const addScannedPoster = useVaultStore((s) => s.addScannedPoster);
 
   // Load poster data on mount
   useEffect(() => {
@@ -22,7 +22,7 @@ export function usePosterRoom(posterId: string) {
   // Save to vault when poster is loaded
   useEffect(() => {
     if (poster) {
-      addToVault(poster);
+      addScannedPoster(poster);
     }
   }, [poster?.id]);
 
