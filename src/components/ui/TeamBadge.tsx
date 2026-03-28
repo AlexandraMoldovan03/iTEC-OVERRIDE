@@ -1,12 +1,12 @@
 /**
  * src/components/ui/TeamBadge.tsx
- * Graffiti crew badge — text tag sau imagine badge, cu glow neon.
+ * Graffiti crew badge — imagine PNG cu fallback colorat.
  *
- * mode="text"  → textul numelui echipei (default, compact, pentru HUD/liste)
- * mode="image" → imaginea badge PNG (pentru profile hero, poster room etc.)
+ * mode="text"  → textul numelui echipei (compact, pentru HUD/liste)
+ * mode="image" → imaginea badge PNG cu fallback colorat dacă nu se încarcă
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet, ViewStyle } from 'react-native';
 import { TeamId } from '../../types/team';
 import { TEAM_COLORS } from '../../theme/colors';
@@ -21,6 +21,42 @@ interface TeamBadgeProps {
   style?:  ViewStyle;
 }
 
+// ─── Inițialele echipelor pentru fallback ─────────────────────────────────────
+
+const TEAM_INITIALS: Record<TeamId, string> = {
+  minimalist:    'M',
+  perfectionist: 'P',
+  chaotic:       'C',
+};
+
+// ─── Fallback colorat (dacă imaginea nu se încarcă) ───────────────────────────
+
+function ImageFallback({ teamId, size }: { teamId: TeamId; size: 'sm' | 'md' | 'lg' }) {
+  const tc      = TEAM_COLORS[teamId];
+  const dim     = size === 'lg' ? 120 : size === 'md' ? 72 : 44;
+  const fontSize = size === 'lg' ? 42 : size === 'md' ? 26 : 16;
+
+  return (
+    <View style={[
+      styles.fallback,
+      {
+        width:           dim,
+        height:          dim,
+        borderRadius:    dim / 2,
+        backgroundColor: tc.primary + '22',
+        borderColor:     tc.primary,
+        shadowColor:     tc.glow,
+      },
+    ]}>
+      <Text style={[styles.fallbackText, { color: tc.primary, fontSize }]}>
+        {TEAM_INITIALS[teamId]}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Component principal ──────────────────────────────────────────────────────
+
 export function TeamBadge({
   teamId,
   size  = 'md',
@@ -31,9 +67,12 @@ export function TeamBadge({
   const teamColor = TEAM_COLORS[teamId];
   const badgeImg  = TEAM_BADGE_IMAGES[teamId];
 
-  // ── Varianta imagine ────────────────────────────────────────
+  const [imgError, setImgError] = useState(false);
+
+  // ── Varianta imagine cu fallback ───────────────────────────
   if (mode === 'image') {
-    const imgSize = size === 'lg' ? 120 : size === 'md' ? 72 : 44;
+    const dim = size === 'lg' ? 120 : size === 'md' ? 72 : 44;
+
     return (
       <View
         style={[
@@ -47,11 +86,17 @@ export function TeamBadge({
           style,
         ]}
       >
-        <Image
-          source={badgeImg}
-          style={{ width: imgSize, height: imgSize }}
-          resizeMode="contain"
-        />
+        {imgError ? (
+          <ImageFallback teamId={teamId} size={size} />
+        ) : (
+          <Image
+            source={badgeImg}
+            style={{ width: dim, height: dim }}
+            resizeMode="contain"
+            onError={() => setImgError(true)}
+            fadeDuration={150}
+          />
+        )}
       </View>
     );
   }
@@ -84,6 +129,7 @@ export function TeamBadge({
 }
 
 const styles = StyleSheet.create({
+  // ── Text badge ─────────────────────────────────────────────
   badge: {
     borderWidth:   1.5,
     borderRadius:  Radius.sm,
@@ -111,5 +157,19 @@ const styles = StyleSheet.create({
   },
   mdText: {
     fontSize: Typography.fontSizes.xs + 1,
+  },
+
+  // ── Fallback ───────────────────────────────────────────────
+  fallback: {
+    borderWidth:    2,
+    alignItems:     'center',
+    justifyContent: 'center',
+    shadowOffset:   { width: 0, height: 0 },
+    shadowOpacity:  0.5,
+    shadowRadius:   8,
+    elevation:      4,
+  },
+  fallbackText: {
+    fontWeight: Typography.fontWeights.black,
   },
 });

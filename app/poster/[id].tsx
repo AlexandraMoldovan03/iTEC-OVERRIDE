@@ -36,11 +36,16 @@ import { OnlineUser } from '../../src/services/wsService';
 import { Image } from 'react-native';
 import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
 
-// ─── Avatar utilizator online (cu badge imagine mic) ─────────────────────────
+// ─── Avatar utilizator online (cu badge imagine mic + fallback) ───────────────
+
+const TEAM_INITIALS: Record<string, string> = {
+  minimalist: 'M', perfectionist: 'P', chaotic: 'C',
+};
 
 function UserAvatar({ user }: { user: OnlineUser }) {
   const tc       = TEAM_COLORS[user.teamId as TeamId];
   const badgeImg = TEAM_BADGE_IMAGES[user.teamId as TeamId];
+  const [imgErr, setImgErr] = React.useState(false);
 
   return (
     <View
@@ -53,11 +58,19 @@ function UserAvatar({ user }: { user: OnlineUser }) {
         },
       ]}
     >
-      <Image
-        source={badgeImg}
-        style={styles.avatarBadge}
-        resizeMode="contain"
-      />
+      {imgErr ? (
+        <Text style={{ color: tc.primary, fontSize: 13, fontWeight: '900' }}>
+          {TEAM_INITIALS[user.teamId] ?? '?'}
+        </Text>
+      ) : (
+        <Image
+          source={badgeImg}
+          style={styles.avatarBadge}
+          resizeMode="contain"
+          onError={() => setImgErr(true)}
+          fadeDuration={100}
+        />
+      )}
     </View>
   );
 }

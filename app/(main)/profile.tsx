@@ -3,7 +3,7 @@
  * Artist profile — badge echipă mare + butoane imagine pentru CTA.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -27,10 +27,18 @@ import {
   SCAN_POSTER_IMAGE,
 } from '../../src/constants/badges';
 
+const TEAM_INITIALS: Record<string, string> = {
+  minimalist: 'M', perfectionist: 'P', chaotic: 'C',
+};
+
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const vaultCount = useVaultStore((s) => s.posters.length);
+
+  const [badgeErr, setBadgeErr]         = useState(false);
+  const [vaultImgErr, setVaultImgErr]   = useState(false);
+  const [scanImgErr, setScanImgErr]     = useState(false);
 
   if (!user) return null;
 
@@ -61,17 +69,26 @@ export default function ProfileScreen() {
         {/* Badge echipă mare — înlocuiește avatarul cu litera */}
         <View style={[
           styles.badgeContainer,
-          {
-            shadowColor:   tc.glow,
-            shadowOpacity: 0.8,
-            shadowRadius:  24,
-          },
+          { shadowColor: tc.glow, shadowOpacity: 0.8, shadowRadius: 24 },
         ]}>
-          <Image
-            source={badgeImg}
-            style={styles.badgeImage}
-            resizeMode="contain"
-          />
+          {badgeErr ? (
+            <View style={[styles.badgeFallback, {
+              backgroundColor: tc.primary + '22',
+              borderColor: tc.primary,
+            }]}>
+              <Text style={[styles.badgeFallbackText, { color: tc.primary }]}>
+                {TEAM_INITIALS[user.teamId] ?? '?'}
+              </Text>
+            </View>
+          ) : (
+            <Image
+              source={badgeImg}
+              style={styles.badgeImage}
+              resizeMode="contain"
+              onError={() => setBadgeErr(true)}
+              fadeDuration={150}
+            />
+          )}
         </View>
 
         <Text style={[styles.username, { color: tc.primary }]}>
@@ -112,11 +129,19 @@ export default function ProfileScreen() {
         onPress={() => router.push('/(main)/vault')}
         activeOpacity={0.82}
       >
-        <Image
-          source={OPEN_VAULT_IMAGE}
-          style={styles.imageBtnImg}
-          resizeMode="contain"
-        />
+        {vaultImgErr ? (
+          <View style={[styles.imageBtnFallback, { borderColor: '#00CFFF' }]}>
+            <Text style={[styles.imageBtnFallbackText, { color: '#00CFFF' }]}>🖼  OPEN VAULT</Text>
+          </View>
+        ) : (
+          <Image
+            source={OPEN_VAULT_IMAGE}
+            style={styles.imageBtnImg}
+            resizeMode="contain"
+            onError={() => setVaultImgErr(true)}
+            fadeDuration={150}
+          />
+        )}
       </TouchableOpacity>
 
       {/* ── CTA imagine — Scan Poster ────────────────────── */}
@@ -125,11 +150,19 @@ export default function ProfileScreen() {
         onPress={() => router.push('/scanner')}
         activeOpacity={0.82}
       >
-        <Image
-          source={SCAN_POSTER_IMAGE}
-          style={styles.imageBtnImg}
-          resizeMode="contain"
-        />
+        {scanImgErr ? (
+          <View style={[styles.imageBtnFallback, { borderColor: '#FF1CF7' }]}>
+            <Text style={[styles.imageBtnFallbackText, { color: '#FF1CF7' }]}>📷  SCAN POSTER</Text>
+          </View>
+        ) : (
+          <Image
+            source={SCAN_POSTER_IMAGE}
+            style={styles.imageBtnImg}
+            resizeMode="contain"
+            onError={() => setScanImgErr(true)}
+            fadeDuration={150}
+          />
+        )}
       </TouchableOpacity>
 
       {/* ── Logout ───────────────────────────────────────── */}
@@ -180,6 +213,18 @@ const styles = StyleSheet.create({
   badgeImage: {
     width:  160,
     height: 160,
+  },
+  badgeFallback: {
+    width:          160,
+    height:         160,
+    borderRadius:   80,
+    borderWidth:    3,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  badgeFallbackText: {
+    fontSize:   60,
+    fontWeight: Typography.fontWeights.black,
   },
 
   // ── Identitate ─────────────────────────────────────────────
@@ -264,6 +309,21 @@ const styles = StyleSheet.create({
   imageBtnImg: {
     width:  '100%',
     height: 90,
+  },
+  imageBtnFallback: {
+    width:           '100%',
+    height:          90,
+    borderRadius:    Radius.sm,
+    borderWidth:     2,
+    alignItems:      'center',
+    justifyContent:  'center',
+    backgroundColor: '#0A0A0A',
+  },
+  imageBtnFallbackText: {
+    fontSize:      Typography.fontSizes.lg,
+    fontWeight:    Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.wider,
+    textTransform: 'uppercase',
   },
 
   // ── Logout ─────────────────────────────────────────────────

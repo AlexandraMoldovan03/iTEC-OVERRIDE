@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Alert,
   Image,
+  ImageSourcePropType,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
@@ -20,6 +21,44 @@ import { Team, TeamId } from '../../src/types/team';
 import { TEAM_COLORS } from '../../src/theme/colors';
 import { Button, ScreenContainer } from '../../src/components/ui';
 import { Colors, Spacing, Radius, Typography } from '../../src/theme';
+
+// ─── Badge cu fallback ────────────────────────────────────────────────────────
+
+const TEAM_INITIALS: Record<string, string> = {
+  minimalist: 'M', perfectionist: 'P', chaotic: 'C',
+};
+
+function BadgeWithFallback({
+  source, teamId, size,
+}: { source: ImageSourcePropType; teamId: string; size: number }) {
+  const [err, setErr] = useState(false);
+  const tc = TEAM_COLORS[teamId as TeamId];
+  if (err) {
+    return (
+      <View style={[styles.badgeImage, {
+        borderRadius: size / 2,
+        backgroundColor: tc.primary + '22',
+        borderWidth: 2, borderColor: tc.primary,
+        alignItems: 'center', justifyContent: 'center',
+      }]}>
+        <Text style={{ color: tc.primary, fontSize: size * 0.38, fontWeight: '900' }}>
+          {TEAM_INITIALS[teamId] ?? '?'}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={source}
+      style={styles.badgeImage}
+      resizeMode="contain"
+      onError={() => setErr(true)}
+      fadeDuration={150}
+    />
+  );
+}
+
+// ─── Ecran principal ──────────────────────────────────────────────────────────
 
 export default function TeamSelectScreen() {
   const params = useLocalSearchParams<{
@@ -114,10 +153,10 @@ export default function TeamSelectScreen() {
                   shadowRadius:  16,
                 },
               ]}>
-                <Image
+                <BadgeWithFallback
                   source={badgeImg}
-                  style={styles.badgeImage}
-                  resizeMode="contain"
+                  teamId={team.id}
+                  size={100}
                 />
                 {/* Inel de selecție glow în jurul badge-ului */}
                 {isSelected && (
