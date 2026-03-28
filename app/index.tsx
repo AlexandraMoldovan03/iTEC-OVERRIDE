@@ -1,32 +1,51 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import { View, StyleSheet, Animated, Image, Dimensions } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useAuthStore } from '../src/stores/authStore';
 
+const { width } = Dimensions.get('window');
+const LOGO = require('./_layout/logo1.png');
+
 export default function IndexPage() {
   const { isAuthenticated, isLoading } = useAuthStore();
-  const pulse = useRef(new Animated.Value(0.4)).current;
+
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const logoScale   = useRef(new Animated.Value(0.85)).current;
+  const dotOpacity  = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
-    const anim = Animated.loop(
+    // Logo apare rapid
+    Animated.parallel([
+      Animated.timing(logoOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.spring(logoScale, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
+    ]).start();
+
+    // Dots pulsează
+    const pulse = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 600, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.4, duration: 600, useNativeDriver: true }),
+        Animated.timing(dotOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.timing(dotOpacity, { toValue: 0.3, duration: 500, useNativeDriver: true }),
       ])
     );
-    anim.start();
-    return () => anim.stop();
+    pulse.start();
+    return () => pulse.stop();
   }, []);
 
-  // Așteptăm restoreSession() să termine înainte de orice redirect
   if (isLoading) {
     return (
       <View style={styles.splash}>
-        <Text style={styles.logo}>MURAL{'\n'}WAR</Text>
-        <Animated.View style={[styles.dotRow, { opacity: pulse }]}>
-          <View style={[styles.dot, { backgroundColor: '#A855F7' }]} />
-          <View style={[styles.dot, { backgroundColor: '#FF1CF7' }]} />
-          <View style={[styles.dot, { backgroundColor: '#39FF14' }]} />
+        <Animated.View style={{ opacity: logoOpacity, transform: [{ scale: logoScale }] }}>
+          <Image
+            source={LOGO}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </Animated.View>
+
+        <Animated.View style={[styles.dotRow, { opacity: dotOpacity }]}>
+          <View style={[styles.dot, { backgroundColor: '#9b5cff' }]} />
+          <View style={[styles.dot, { backgroundColor: '#ff43bf' }]} />
+          <View style={[styles.dot, { backgroundColor: '#77ff5f' }]} />
         </Animated.View>
       </View>
     );
@@ -42,22 +61,14 @@ export default function IndexPage() {
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#080808',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 32,
   },
   logo: {
-    color: '#FFFFFF',
-    fontSize: 52,
-    fontWeight: '900',
-    letterSpacing: 8,
-    textAlign: 'center',
-    lineHeight: 56,
-    textTransform: 'uppercase',
-    textShadowColor: '#A855F7',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
+    width: width * 0.72,
+    height: width * 0.46,
   },
   dotRow: {
     flexDirection: 'row',

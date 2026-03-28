@@ -4,11 +4,14 @@
  */
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Image, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
 import { Button, AppTextInput, ScreenContainer } from '../../src/components/ui';
 import { Colors, Spacing, Typography, Radius } from '../../src/theme';
+
+const { width } = Dimensions.get('window');
+const LOGO = require('../_layout/logo1.png');
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -42,7 +45,7 @@ export default function LoginScreen() {
 
       {/* ── Header ───────────────────────────────────────── */}
       <View style={styles.header}>
-        <Text style={styles.label}>SIGN IN</Text>
+        <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
         <Text style={styles.title}>Welcome{'\n'}Back.</Text>
         <View style={styles.accentLine} />
         <Text style={styles.subtitle}>Reclaim your territory</Text>
@@ -101,15 +104,16 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.widest,
   },
   header: {
-    paddingTop: Spacing[6],
-    paddingBottom: Spacing[8],
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[6],
     gap: Spacing[2],
   },
-  label: {
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
-    color: Colors.accentPurple,
-    letterSpacing: Typography.letterSpacing.widest,
+  logoSmall: {
+    width: width * 0.52,
+    height: width * 0.33,
+    alignSelf: 'flex-start',
+    marginLeft: -8,
+    marginBottom: -4,
   },
   title: {
     fontSize: Typography.fontSizes['4xl'],

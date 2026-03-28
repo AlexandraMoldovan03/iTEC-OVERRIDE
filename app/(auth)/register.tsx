@@ -4,10 +4,13 @@
  */
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Button, AppTextInput, ScreenContainer } from '../../src/components/ui';
 import { Colors, Spacing, Typography } from '../../src/theme';
+
+const { width } = Dimensions.get('window');
+const LOGO = require('../_layout/logo1.png');
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -43,7 +46,7 @@ export default function RegisterScreen() {
 
       {/* ── Header ───────────────────────────────────────── */}
       <View style={styles.header}>
-        <Text style={styles.label}>NEW ARTIST</Text>
+        <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
         <Text style={styles.title}>Create{'\n'}Your Tag.</Text>
         <View style={styles.accentLine} />
         <Text style={styles.subtitle}>Your identity on every wall</Text>
@@ -112,15 +115,16 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.widest,
   },
   header: {
-    paddingTop: Spacing[6],
-    paddingBottom: Spacing[8],
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[6],
     gap: Spacing[2],
   },
-  label: {
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
-    color: Colors.accentPink,
-    letterSpacing: Typography.letterSpacing.widest,
+  logoSmall: {
+    width: width * 0.52,
+    height: width * 0.33,
+    alignSelf: 'flex-start',
+    marginLeft: -8,
+    marginBottom: -4,
   },
   title: {
     fontSize: Typography.fontSizes['4xl'],

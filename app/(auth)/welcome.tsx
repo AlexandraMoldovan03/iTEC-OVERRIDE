@@ -1,4 +1,9 @@
-import React from 'react';
+/**
+ * app/(auth)/welcome.tsx
+ * Graffiti hero — logo "MAKE IT SEEN" cu animații de intrare în cascadă.
+ */
+
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,21 +11,75 @@ import {
   TouchableOpacity,
   StatusBar,
   Dimensions,
+  Animated,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
 
+const LOGO = require('../_layout/logo1.png');
+
 export default function WelcomeScreen() {
   const router = useRouter();
+
+  // ── Valori animate ────────────────────────────────────────
+  const logoScale    = useRef(new Animated.Value(0.6)).current;
+  const logoOpacity  = useRef(new Animated.Value(0)).current;
+  const doodleOpacity = useRef(new Animated.Value(0)).current;
+  const badgeOpacity = useRef(new Animated.Value(0)).current;
+  const badgeTransY  = useRef(new Animated.Value(-20)).current;
+  const panelTransY  = useRef(new Animated.Value(80)).current;
+  const panelOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // 1. Doodle-urile apar subtil primele
+    Animated.timing(doodleOpacity, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+
+    // 2. Badge-ul coboară din sus
+    Animated.sequence([
+      Animated.delay(150),
+      Animated.parallel([
+        Animated.timing(badgeOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.spring(badgeTransY, { toValue: 0, tension: 80, friction: 10, useNativeDriver: true }),
+      ]),
+    ]).start();
+
+    // 3. Logo-ul face spring — sare în față cu energie
+    Animated.sequence([
+      Animated.delay(300),
+      Animated.parallel([
+        Animated.timing(logoOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.spring(logoScale, {
+          toValue: 1,
+          tension: 55,
+          friction: 7,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+
+    // 4. Panoul de jos urcă
+    Animated.sequence([
+      Animated.delay(550),
+      Animated.parallel([
+        Animated.timing(panelOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.spring(panelTransY, { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
+      ]),
+    ]).start();
+  }, []);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Background graffiti doodles */}
-      <View style={styles.bgLayer}>
+      {/* ── Background doodles ────────────────────────────── */}
+      <Animated.View style={[styles.bgLayer, { opacity: doodleOpacity }]}>
         <Text style={[styles.doodle, styles.doodle1]}>✦</Text>
         <Text style={[styles.doodle, styles.doodle2]}>⚡</Text>
         <Text style={[styles.doodle, styles.doodle3]}>★</Text>
@@ -31,49 +90,58 @@ export default function WelcomeScreen() {
         <Text style={[styles.doodle, styles.doodle8]}>→</Text>
         <Text style={[styles.doodle, styles.doodle9]}>HAHA</Text>
         <Text style={[styles.doodle, styles.doodle10]}>BOOM</Text>
-      </View>
+      </Animated.View>
 
-      {/* Top sticker */}
-      <View style={styles.topBadgeWrap}>
+      {/* ── Top badge ─────────────────────────────────────── */}
+      <Animated.View
+        style={[
+          styles.topBadgeWrap,
+          { opacity: badgeOpacity, transform: [{ translateY: badgeTransY }] },
+        ]}
+      >
         <View style={styles.topBadge}>
           <Text style={styles.topBadgeText}>PUT YOUR TAG ON THE CITY</Text>
         </View>
-      </View>
+      </Animated.View>
 
-      {/* Center hero */}
+      {/* ── Hero logo ─────────────────────────────────────── */}
       <View style={styles.hero}>
         <View style={styles.smallStickerLeft}>
           <Text style={styles.smallStickerText}>NEW</Text>
         </View>
-
         <View style={styles.smallStickerRight}>
           <Text style={styles.smallStickerText}>WILD</Text>
         </View>
 
-        <Text style={styles.mural}>MURAL</Text>
-
-        <View style={styles.sprayWrap}>
-          <LinearGradient
-            colors={['#ff49c6', '#ff2ea6', '#ff66d9']}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={styles.spray}
-          >
-            <Text style={styles.war}>WAR</Text>
-          </LinearGradient>
-        </View>
-
-        <View style={styles.yearBadge}>
-          <Text style={styles.yearText}>2026</Text>
-        </View>
+        {/* Logo animat — "MAKE IT SEEN" */}
+        <Animated.View
+          style={[
+            styles.logoWrap,
+            {
+              opacity: logoOpacity,
+              transform: [{ scale: logoScale }],
+            },
+          ]}
+        >
+          <Image
+            source={LOGO}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </Animated.View>
 
         <Text style={styles.sub}>
           SCAN POSTERS. CLAIM SPOTS. LEAVE YOUR MARK.
         </Text>
       </View>
 
-      {/* Bottom card */}
-      <View style={styles.bottomPanel}>
+      {/* ── Bottom panel ──────────────────────────────────── */}
+      <Animated.View
+        style={[
+          styles.bottomPanel,
+          { opacity: panelOpacity, transform: [{ translateY: panelTransY }] },
+        ]}
+      >
         <View style={styles.panelDecor1} />
         <View style={styles.panelDecor2} />
 
@@ -107,18 +175,18 @@ export default function WelcomeScreen() {
         >
           <Text style={styles.secondaryBtnText}>I ALREADY HAVE A CREW</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
 
-const neonPink = '#ff43bf';
+// ── Culori ────────────────────────────────────────────────────
+const neonPink   = '#ff43bf';
 const neonPurple = '#9b5cff';
-const neonBlue = '#2f7bff';
+const neonBlue   = '#2f7bff';
 const neonYellow = '#ffe44d';
-const neonGreen = '#77ff5f';
-const paper = '#f5f1eb';
-const black = '#080808';
+const neonGreen  = '#77ff5f';
+const black      = '#080808';
 
 const styles = StyleSheet.create({
   container: {
@@ -128,84 +196,27 @@ const styles = StyleSheet.create({
     paddingTop: 64,
   },
 
+  // ── Doodles ───────────────────────────────────────────────
   bgLayer: {
     ...StyleSheet.absoluteFillObject,
   },
-
   doodle: {
     position: 'absolute',
     fontWeight: '900',
     opacity: 0.95,
   },
-  doodle1: {
-    top: 90,
-    left: 28,
-    color: neonYellow,
-    fontSize: 22,
-    transform: [{ rotate: '-12deg' }],
-  },
-  doodle2: {
-    top: 140,
-    right: 28,
-    color: neonBlue,
-    fontSize: 30,
-    transform: [{ rotate: '15deg' }],
-  },
-  doodle3: {
-    top: 260,
-    left: 18,
-    color: neonGreen,
-    fontSize: 24,
-  },
-  doodle4: {
-    top: 330,
-    right: 34,
-    color: neonPink,
-    fontSize: 28,
-  },
-  doodle5: {
-    top: 210,
-    right: 70,
-    color: neonYellow,
-    fontSize: 18,
-    transform: [{ rotate: '-10deg' }],
-  },
-  doodle6: {
-    bottom: 290,
-    left: 34,
-    color: neonBlue,
-    fontSize: 22,
-  },
-  doodle7: {
-    bottom: 220,
-    right: 32,
-    color: neonGreen,
-    fontSize: 18,
-  },
-  doodle8: {
-    bottom: 170,
-    left: 60,
-    color: neonPink,
-    fontSize: 30,
-    transform: [{ rotate: '-12deg' }],
-  },
-  doodle9: {
-    bottom: 120,
-    right: 28,
-    color: neonPurple,
-    fontSize: 24,
-    fontWeight: '900',
-    transform: [{ rotate: '-8deg' }],
-  },
-  doodle10: {
-    bottom: 145,
-    left: 22,
-    color: neonBlue,
-    fontSize: 22,
-    fontWeight: '900',
-    transform: [{ rotate: '8deg' }],
-  },
+  doodle1:  { top: 90,    left: 28,  color: neonYellow, fontSize: 22, transform: [{ rotate: '-12deg' }] },
+  doodle2:  { top: 140,   right: 28, color: neonBlue,   fontSize: 30, transform: [{ rotate: '15deg'  }] },
+  doodle3:  { top: 260,   left: 18,  color: neonGreen,  fontSize: 24 },
+  doodle4:  { top: 330,   right: 34, color: neonPink,   fontSize: 28 },
+  doodle5:  { top: 210,   right: 70, color: neonYellow, fontSize: 18, transform: [{ rotate: '-10deg' }] },
+  doodle6:  { bottom: 290, left: 34, color: neonBlue,   fontSize: 22 },
+  doodle7:  { bottom: 220, right: 32,color: neonGreen,  fontSize: 18 },
+  doodle8:  { bottom: 170, left: 60, color: neonPink,   fontSize: 30, transform: [{ rotate: '-12deg' }] },
+  doodle9:  { bottom: 120, right: 28,color: neonPurple, fontSize: 24, fontWeight: '900', transform: [{ rotate: '-8deg' }] },
+  doodle10: { bottom: 145, left: 22, color: neonBlue,   fontSize: 22, fontWeight: '900', transform: [{ rotate: '8deg'  }] },
 
+  // ── Top badge ─────────────────────────────────────────────
   topBadgeWrap: {
     alignItems: 'center',
     zIndex: 3,
@@ -219,7 +230,7 @@ const styles = StyleSheet.create({
     borderColor: '#000',
     transform: [{ rotate: '-4deg' }],
     shadowColor: neonYellow,
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.4,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 0 },
     elevation: 8,
@@ -231,6 +242,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
 
+  // ── Hero ──────────────────────────────────────────────────
   hero: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -238,11 +250,10 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
   },
-
   smallStickerLeft: {
     position: 'absolute',
     left: 24,
-    top: 70,
+    top: 30,
     backgroundColor: neonBlue,
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -250,11 +261,12 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#000',
     transform: [{ rotate: '-15deg' }],
+    zIndex: 2,
   },
   smallStickerRight: {
     position: 'absolute',
     right: 24,
-    top: 120,
+    top: 70,
     backgroundColor: neonGreen,
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -262,6 +274,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#000',
     transform: [{ rotate: '12deg' }],
+    zIndex: 2,
   },
   smallStickerText: {
     color: '#000',
@@ -270,74 +283,35 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
 
-  mural: {
-    color: paper,
-    fontSize: width < 380 ? 54 : 64,
-    fontWeight: '900',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    lineHeight: width < 380 ? 58 : 68,
-    textAlign: 'center',
-    textShadowColor: 'rgba(255,255,255,0.08)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
-  },
-
-  sprayWrap: {
-    marginTop: -6,
-    marginBottom: 12,
-    transform: [{ rotate: '-4deg' }],
-  },
-  spray: {
-    paddingHorizontal: 26,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 4,
-    borderColor: '#000',
+  // ── Logo ──────────────────────────────────────────────────
+  logoWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    // Umbra colorată sub logo
     shadowColor: neonPink,
-    shadowOpacity: 0.6,
-    shadowRadius: 20,
     shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 30,
     elevation: 12,
   },
-  war: {
-    color: '#fff',
-    fontSize: width < 380 ? 52 : 64,
-    fontWeight: '900',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    textShadowColor: 'rgba(255,255,255,0.25)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 12,
-  },
-
-  yearBadge: {
-    backgroundColor: paper,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 3,
-    borderColor: '#000',
-    transform: [{ rotate: '8deg' }],
-    marginBottom: 18,
-  },
-  yearText: {
-    color: '#000',
-    fontWeight: '900',
-    fontSize: 14,
-    letterSpacing: 1.3,
+  logo: {
+    width: width * 0.82,
+    height: width * 0.52,
   },
 
   sub: {
     color: '#d9d9d9',
     textAlign: 'center',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.5,
-    lineHeight: 22,
-    maxWidth: 320,
+    letterSpacing: 1.8,
+    lineHeight: 20,
+    maxWidth: 300,
+    marginTop: 4,
   },
 
+  // ── Bottom panel ──────────────────────────────────────────
   bottomPanel: {
     backgroundColor: '#111111',
     borderTopLeftRadius: 34,
@@ -352,7 +326,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
-
   panelDecor1: {
     position: 'absolute',
     width: 130,
@@ -374,7 +347,6 @@ const styles = StyleSheet.create({
     left: -20,
     opacity: 0.95,
   },
-
   panelTitle: {
     color: '#fff',
     fontSize: 28,
@@ -385,7 +357,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     maxWidth: 260,
   },
-
   panelText: {
     color: '#c7c7c7',
     fontSize: 15,
@@ -394,7 +365,6 @@ const styles = StyleSheet.create({
     marginBottom: 22,
     maxWidth: 300,
   },
-
   primaryBtn: {
     borderRadius: 20,
     overflow: 'hidden',
@@ -413,7 +383,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 1.2,
   },
-
   secondaryBtn: {
     alignItems: 'center',
     justifyContent: 'center',
