@@ -1,9 +1,9 @@
 /**
  * app/(auth)/welcome.tsx
- * Graffiti hero — logo "MAKE IT SEEN" cu animații de intrare în cascadă.
+ * Graffiti hero — logo "MAKE IT SEEN" with cascading entry animations.
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,15 +16,33 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Audio } from 'expo-av';
 
 const { width } = Dimensions.get('window');
 
+// ── Asset Constants ──────────────────────────────────────────
+const SPRAY1 = require('../_layout/spray1.png');
+const SPRAY2 = require('../_layout/spray2.png');
+const SPRAY3 = require('../_layout/spray3.png');
+const SPRAY_CAN = require('../_layout/spray can.png');
 const LOGO = require('../_layout/logo1.png');
+
+// ── Colors ────────────────────────────────────────────────────
+const neonPink   = '#ff43bf';
+const neonPurple = '#9b5cff';
+const neonBlue   = '#2f7bff';
+const neonYellow = '#ffe44d';
+const neonGreen  = '#77ff5f';
+const black      = '#080808';
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const soundRef = useRef<Audio.Sound | null>(null);
 
-  // ── Valori animate ────────────────────────────────────────
+  // ── Animation States & Refs ───────────────────────────────
+  const [sprayFrame, setSprayFrame] = useState(0);
+  const sprayOpacity = useRef(new Animated.Value(0)).current;
+  
   const logoScale    = useRef(new Animated.Value(0.6)).current;
   const logoOpacity  = useRef(new Animated.Value(0)).current;
   const doodleOpacity = useRef(new Animated.Value(0)).current;
@@ -33,45 +51,85 @@ export default function WelcomeScreen() {
   const panelTransY  = useRef(new Animated.Value(80)).current;
   const panelOpacity = useRef(new Animated.Value(0)).current;
 
+  const sprayImages = [SPRAY1, SPRAY2, SPRAY3];
+
   useEffect(() => {
-    // 1. Doodle-urile apar subtil primele
-    Animated.timing(doodleOpacity, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
+    // 1. Core UI Entry Animations
+    Animated.parallel([
+      // Doodles fade in
+      Animated.timing(doodleOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      
+      // Top Badge drops in
+      Animated.sequence([
+        Animated.delay(150),
+        Animated.parallel([
+          Animated.timing(badgeOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+          Animated.spring(badgeTransY, { toValue: 0, tension: 80, friction: 10, useNativeDriver: true }),
+        ]),
+      ]),
 
-    // 2. Badge-ul coboară din sus
-    Animated.sequence([
-      Animated.delay(150),
-      Animated.parallel([
-        Animated.timing(badgeOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
-        Animated.spring(badgeTransY, { toValue: 0, tension: 80, friction: 10, useNativeDriver: true }),
+      // Logo pops forward
+      Animated.sequence([
+        Animated.delay(300),
+        Animated.parallel([
+          Animated.timing(logoOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+          Animated.spring(logoScale, { toValue: 1, tension: 55, friction: 7, useNativeDriver: true }),
+        ]),
+      ]),
+
+      // Bottom panel slides up
+      Animated.sequence([
+        Animated.delay(550),
+        Animated.parallel([
+          Animated.timing(panelOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+          Animated.spring(panelTransY, { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
+        ]),
       ]),
     ]).start();
 
-    // 3. Logo-ul face spring — sare în față cu energie
-    Animated.sequence([
-      Animated.delay(300),
-      Animated.parallel([
-        Animated.timing(logoOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.spring(logoScale, {
+    // 2. Spray SFX and Visual Sequence
+    const startSpraySequence = async () => {
+      try {
+        // Delay to sync with logo appearance
+        await new Promise(resolve => setTimeout(resolve, 600));
+
+        const { sound } = await Audio.Sound.createAsync(require('../_layout/spray.mp3'));
+        soundRef.current = sound;
+        await sound.playAsync();
+
+        // Show spray overlay
+        Animated.timing(sprayOpacity, {
           toValue: 1,
-          tension: 55,
-          friction: 7,
+          duration: 150,
           useNativeDriver: true,
-        }),
-      ]),
-    ]).start();
+        }).start();
 
-    // 4. Panoul de jos urcă
-    Animated.sequence([
-      Animated.delay(550),
-      Animated.parallel([
-        Animated.timing(panelOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
-        Animated.spring(panelTransY, { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
-      ]),
-    ]).start();
+        // Animate frames
+        setTimeout(() => setSprayFrame(1), 650);
+        setTimeout(() => setSprayFrame(2), 1300);
+
+        // Hide spray
+        setTimeout(() => {
+          Animated.timing(sprayOpacity, {
+            toValue: 0,
+            duration: 400,
+            useNativeDriver: true,
+          }).start();
+        }, 2000);
+
+      } catch (e) {
+        console.log('Animation sound error:', e);
+      }
+    };
+
+    startSpraySequence();
+
+    // Cleanup: Stop audio if user leaves screen early
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.unloadAsync();
+      }
+    };
   }, []);
 
   return (
@@ -113,7 +171,6 @@ export default function WelcomeScreen() {
           <Text style={styles.smallStickerText}>WILD</Text>
         </View>
 
-        {/* Logo animat — "MAKE IT SEEN" */}
         <Animated.View
           style={[
             styles.logoWrap,
@@ -123,11 +180,16 @@ export default function WelcomeScreen() {
             },
           ]}
         >
-          <Image
-            source={LOGO}
-            style={styles.logo}
-            resizeMode="contain"
+          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+          
+          {/* Spray animation overlay */}
+          <Animated.Image
+            source={sprayImages[sprayFrame]}
+            style={[styles.sprayOverlay, { opacity: sprayOpacity }]}
           />
+
+          {/* Spray can icon */}
+          <Image source={SPRAY_CAN} style={styles.sprayCan} />
         </Animated.View>
 
         <Text style={styles.sub}>
@@ -145,9 +207,7 @@ export default function WelcomeScreen() {
         <View style={styles.panelDecor1} />
         <View style={styles.panelDecor2} />
 
-        <Text style={styles.panelTitle}>
-          THE STREET{'\n'}IS YOUR CANVAS
-        </Text>
+        <Text style={styles.panelTitle}>THE STREET{'\n'}IS YOUR CANVAS</Text>
 
         <Text style={styles.panelText}>
           Join the chaos, scan the walls, unlock battles, and own your territory.
@@ -180,14 +240,6 @@ export default function WelcomeScreen() {
   );
 }
 
-// ── Culori ────────────────────────────────────────────────────
-const neonPink   = '#ff43bf';
-const neonPurple = '#9b5cff';
-const neonBlue   = '#2f7bff';
-const neonYellow = '#ffe44d';
-const neonGreen  = '#77ff5f';
-const black      = '#080808';
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -195,8 +247,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 64,
   },
-
-  // ── Doodles ───────────────────────────────────────────────
   bgLayer: {
     ...StyleSheet.absoluteFillObject,
   },
@@ -216,7 +266,6 @@ const styles = StyleSheet.create({
   doodle9:  { bottom: 120, right: 28,color: neonPurple, fontSize: 24, fontWeight: '900', transform: [{ rotate: '-8deg' }] },
   doodle10: { bottom: 145, left: 22, color: neonBlue,   fontSize: 22, fontWeight: '900', transform: [{ rotate: '8deg'  }] },
 
-  // ── Top badge ─────────────────────────────────────────────
   topBadgeWrap: {
     alignItems: 'center',
     zIndex: 3,
@@ -241,8 +290,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 1.2,
   },
-
-  // ── Hero ──────────────────────────────────────────────────
   hero: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -282,13 +329,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 1,
   },
-
-  // ── Logo ──────────────────────────────────────────────────
   logoWrap: {
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
-    // Umbra colorată sub logo
     shadowColor: neonPink,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.45,
@@ -299,7 +343,20 @@ const styles = StyleSheet.create({
     width: width * 0.82,
     height: width * 0.52,
   },
-
+  sprayOverlay: {
+    position: 'absolute',
+    width: width * 0.85,
+    height: width * 0.6,
+    resizeMode: 'contain',
+  },
+  sprayCan: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    right: -10,
+    bottom: -10,
+    resizeMode: 'contain',
+  },
   sub: {
     color: '#d9d9d9',
     textAlign: 'center',
@@ -310,8 +367,6 @@ const styles = StyleSheet.create({
     maxWidth: 300,
     marginTop: 4,
   },
-
-  // ── Bottom panel ──────────────────────────────────────────
   bottomPanel: {
     backgroundColor: '#111111',
     borderTopLeftRadius: 34,
