@@ -5,3 +5,4 @@
 export * from './colorUtils';
 export * from './timeUtils';
 export * from './posterUtils';
+export * from './scoring';

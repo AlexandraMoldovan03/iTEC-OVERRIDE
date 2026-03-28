@@ -1,27 +1,29 @@
 /**
  * src/components/mural/MuralCanvas.tsx
- * The touch-responsive drawing surface overlaid on the poster.
- * Renders existing layers and the in-progress stroke.
+ * Suprafața de desen cu randare live a stroke-urilor altor utilizatori.
  *
- * NOTE: For Expo Go compatibility we use React Native's built-in drawing
- * primitives via react-native-svg. All positions are stored in normalized
- * coordinates and scaled to the canvas dimensions at render time.
+ * Straturi SVG (bottom → top):
+ *  1. Layere permanente (salvate)
+ *  2. Stroke-uri remote active (alți useri desenează live)
+ *  3. Stroke-ul local activ (preview propriul desen, dashed)
  */
 
 import React, { useState } from 'react';
 import { View, StyleSheet, LayoutChangeEvent } from 'react-native';
 import Svg, { Path, Circle, Text as SvgText, G } from 'react-native-svg';
 import { PosterLayerItem, BrushStrokeItem, StickerItem, TeamStampItem } from '../../types/mural';
+import { RemoteStroke } from '../../stores/posterStore';
 import { useMuralCanvas } from '../../hooks/useMuralCanvas';
+import { usePosterStore } from '../../stores/posterStore';
 import { TEAM_COLORS } from '../../theme/colors';
 import { TeamId } from '../../types/team';
 
 interface MuralCanvasProps {
-  layers: PosterLayerItem[];
-  posterWidth: number;
+  layers:       PosterLayerItem[];
+  posterWidth:  number;
   posterHeight: number;
-  posterX: number;
-  posterY: number;
+  posterX:      number;
+  posterY:      number;
 }
 
 export function MuralCanvas({
@@ -32,20 +34,22 @@ export function MuralCanvas({
   posterY,
 }: MuralCanvasProps) {
   const [canvasLayout, setCanvasLayout] = useState({
-    width: posterWidth,
+    width:  posterWidth,
     height: posterHeight,
   });
 
+  const remoteStrokes = usePosterStore((s) => s.remoteStrokes);
+
   const { activeStroke, onTouchStart, onTouchMove, onTouchEnd } = useMuralCanvas({
-    width: canvasLayout.width,
-    height: canvasLayout.height,
+    width:   canvasLayout.width,
+    height:  canvasLayout.height,
     offsetX: posterX,
     offsetY: posterY,
   });
 
   const onLayout = (e: LayoutChangeEvent) => {
     setCanvasLayout({
-      width: e.nativeEvent.layout.width,
+      width:  e.nativeEvent.layout.width,
       height: e.nativeEvent.layout.height,
     });
   };
@@ -53,7 +57,6 @@ export function MuralCanvas({
   const toX = (nx: number) => nx * canvasLayout.width;
   const toY = (ny: number) => ny * canvasLayout.height;
 
-  /** Convert a list of normalized points to an SVG path string */
   const toPath = (points: Array<{ x: number; y: number }>) => {
     if (points.length === 0) return '';
     const [first, ...rest] = points;
@@ -61,6 +64,8 @@ export function MuralCanvas({
     rest.forEach((p) => d.push(`L ${toX(p.x)} ${toY(p.y)}`));
     return d.join(' ');
   };
+
+  // ── Randare layer permanent ────────────────────────────────
 
   const renderLayer = (item: PosterLayerItem) => {
     const teamColor = TEAM_COLORS[item.teamId as TeamId];
@@ -73,7 +78,6 @@ export function MuralCanvas({
       const isGlow = d.type === 'glow';
       return (
         <G key={item.id}>
-          {/* Team-colored outline/glow for visual identity */}
           <Path
             d={pathD}
             stroke={teamColor.glow}
@@ -83,7 +87,6 @@ export function MuralCanvas({
             fill="none"
             opacity={0.5}
           />
-          {/* Main stroke */}
           <Path
             d={pathD}
             stroke={stroke.color}
@@ -162,9 +165,62 @@ export function MuralCanvas({
     return null;
   };
 
-  /** Active in-progress stroke preview */
-  const activePathD =
-    activeStroke.length > 1 ? toPath(activeStroke) : undefined;
+  // ── Randare stroke remote live ─────────────────────────────
+  // Stroke-ul altui utilizator apare cu culoarea echipei lui ca glow
+  // și culoarea proprie ca linie principală — identic cu stroke-urile permanente.
+
+  const renderRemoteStroke = (rs: RemoteStroke) => {
+    const pathD = toPath(rs.points);
+    if (!pathD || rs.points.length < 2) return null;
+
+    const teamColor = TEAM_COLORS[rs.teamId as TeamId];
+    const isGlow    = rs.toolType === 'glow';
+    const isErase   = rs.toolType === 'erase';
+
+    if (isErase) {
+      return (
+        <Path
+          key={rs.strokeId}
+          d={pathD}
+          stroke="black"
+          strokeWidth={rs.strokeWidth * 2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+          opacity={0.8}
+        />
+      );
+    }
+
+    return (
+      <G key={rs.strokeId}>
+        {/* Glow echipă — identitate vizuală clară */}
+        <Path
+          d={pathD}
+          stroke={teamColor.glow}
+          strokeWidth={rs.strokeWidth + (isGlow ? 10 : 5)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+          opacity={0.45}
+        />
+        {/* Linia principală */}
+        <Path
+          d={pathD}
+          stroke={rs.color}
+          strokeWidth={rs.strokeWidth}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+          opacity={rs.opacity * 0.9}
+        />
+      </G>
+    );
+  };
+
+  // ── Preview local (stroke propriu, în curs) ────────────────
+
+  const activePathD = activeStroke.length > 1 ? toPath(activeStroke) : undefined;
 
   return (
     <View
@@ -176,11 +232,18 @@ export function MuralCanvas({
       onResponderRelease={onTouchEnd}
     >
       <Svg width={canvasLayout.width} height={canvasLayout.height}>
+
+        {/* 1. Layere permanente */}
         {layers.map((layer) => renderLayer(layer))}
+
+        {/* 2. Stroke-uri live de la alți utilizatori */}
+        {Object.values(remoteStrokes).map((rs) => renderRemoteStroke(rs))}
+
+        {/* 3. Preview stroke propriu (dashed) */}
         {activePathD && (
           <Path
             d={activePathD}
-            stroke="rgba(255,255,255,0.8)"
+            stroke="rgba(255,255,255,0.85)"
             strokeWidth={6}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -196,7 +259,7 @@ export function MuralCanvas({
 const styles = StyleSheet.create({
   canvas: {
     position: 'absolute',
-    top: 0,
+    top:  0,
     left: 0,
   },
 });

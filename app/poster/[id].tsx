@@ -1,11 +1,11 @@
 /**
  * app/poster/[id].tsx
- * The Poster Room — the live mural battle arena.
+ * Camera poster — arena de battle live.
  *
  * Layout:
- *   [Top HUD: poster name + WS status]
- *   [Poster anchor view with mural canvas overlay]
- *   [Territory panel — collapsible]
+ *   [HUD top: poster name + utilizatori online + status live]
+ *   [Poster anchor view cu mural canvas overlay]
+ *   [Territory panel — colapsabil]
  *   [Tool options row: color picker / sticker picker]
  *   [Bottom toolbar: mural tools]
  */
@@ -17,6 +17,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   TouchableOpacity,
+  ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { usePosterRoom } from '../../src/hooks/usePosterRoom';
@@ -27,17 +28,53 @@ import { MuralToolbar } from '../../src/components/mural/MuralToolbar';
 import { ColorPicker } from '../../src/components/mural/ColorPicker';
 import { StickerPicker } from '../../src/components/mural/StickerPicker';
 import { LiveIndicator } from '../../src/components/ui/LiveIndicator';
-import { MOCK_USERS } from '../../src/mock/users';
-import { Colors, Spacing, Typography } from '../../src/theme';
+import { LeaderboardPanel } from '../../src/components/poster/LeaderboardPanel';
+import { Colors, Spacing, Typography, Radius } from '../../src/theme';
+import { TEAM_COLORS } from '../../src/theme/colors';
+import { TeamId } from '../../src/types/team';
+import { OnlineUser } from '../../src/services/wsService';
+
+// ─── Avatar utilizator online ─────────────────────────────────────────────────
+
+function UserAvatar({ user }: { user: OnlineUser }) {
+  const tc = TEAM_COLORS[user.teamId as TeamId];
+  const initial = (user.username?.[0] ?? '?').toUpperCase();
+
+  return (
+    <View
+      style={[
+        styles.avatar,
+        {
+          backgroundColor: tc.primary + '22',
+          borderColor: tc.primary,
+          shadowColor: tc.glow,
+        },
+      ]}
+    >
+      <Text style={[styles.avatarText, { color: tc.primary }]}>{initial}</Text>
+    </View>
+  );
+}
+
+// ─── Ecran principal ──────────────────────────────────────────────────────────
 
 export default function PosterRoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  const { poster, layers, isLoadingPoster, isLoadingLayers, wsConnected, error } =
-    usePosterRoom(id);
+  const {
+    poster,
+    layers,
+    isLoadingPoster,
+    isLoadingLayers,
+    wsConnected,
+    onlineUsers,
+    error,
+  } = usePosterRoom(id);
 
   const activeTool = useMuralToolStore((s) => s.activeTool);
+
+  // ── Stări de eroare / loading ─────────────────────────────
 
   if (error) {
     return (
@@ -59,37 +96,75 @@ export default function PosterRoomScreen() {
     );
   }
 
-  // Resolve usernames for recent contributors
-  const recentNames = poster.territory.recentContributorIds.map(
-    (id) => MOCK_USERS.find((u) => u.id === id)?.username ?? id
-  );
+  // Maxim 5 avatare în HUD, restul afișat ca "+N"
+  const visibleUsers = onlineUsers.slice(0, 5);
+  const extraCount   = Math.max(0, onlineUsers.length - 5);
 
   return (
     <View style={styles.screen}>
-      {/* HUD top bar */}
+
+      {/* ── HUD top ──────────────────────────────────────── */}
       <View style={styles.hud}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.hudBack}>
-          <Text style={styles.hudBackText}>✕</Text>
+
+        {/* Buton închidere */}
+        <TouchableOpacity onPress={() => router.back()} style={styles.hudClose}>
+          <Text style={styles.hudCloseText}>✕</Text>
         </TouchableOpacity>
+
+        {/* Titlu poster */}
         <View style={styles.hudCenter}>
           <Text style={styles.hudTitle} numberOfLines={1}>{poster.name}</Text>
         </View>
+
+        {/* Status live */}
         <LiveIndicator connected={wsConnected} style={styles.liveIndicator} />
       </View>
 
-      {/* Poster + mural canvas */}
+      {/* ── Bandă de utilizatori online ──────────────────── */}
+      {onlineUsers.length > 0 && (
+        <View style={styles.presenceBand}>
+          <Text style={styles.presenceLabel}>ONLINE NOW</Text>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.avatarRow}
+          >
+            {visibleUsers.map((u) => (
+              <View key={u.userId} style={styles.avatarWrap}>
+                <UserAvatar user={u} />
+                <Text style={styles.avatarName} numberOfLines={1}>
+                  {u.username}
+                </Text>
+              </View>
+            ))}
+
+            {extraCount > 0 && (
+              <View style={[styles.avatar, styles.avatarExtra]}>
+                <Text style={styles.avatarExtraText}>+{extraCount}</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ── Poster + mural canvas ────────────────────────── */}
       <PosterAnchorView poster={poster} layers={isLoadingLayers ? [] : layers} />
 
-      {/* Territory info panel */}
+      {/* ── Panels scrollabili ────────────────────────────── */}
       <View style={styles.panelWrap}>
+        {/* Clasament în timp real */}
+        <LeaderboardPanel />
+
+        {/* Territory panel */}
         <TerritoryPanel
           territory={poster.territory}
           wsConnected={wsConnected}
-          recentContributorUsernames={recentNames}
+          recentContributorUsernames={onlineUsers.map((u) => u.username)}
         />
       </View>
 
-      {/* Tool option row — contextual */}
+      {/* ── Tool options — contextual ────────────────────── */}
       <View style={styles.toolOptions}>
         {(activeTool === 'brush' || activeTool === 'spray' || activeTool === 'glow') && (
           <ColorPicker />
@@ -97,11 +172,13 @@ export default function PosterRoomScreen() {
         {activeTool === 'sticker' && <StickerPicker />}
       </View>
 
-      {/* Bottom toolbar */}
+      {/* ── Toolbar desen ────────────────────────────────── */}
       <MuralToolbar />
     </View>
   );
 }
+
+// ─── Stiluri ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   screen: {
@@ -119,6 +196,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: Typography.fontSizes.sm,
     letterSpacing: Typography.letterSpacing.wide,
+    textTransform: 'uppercase',
   },
   errorText: {
     color: Colors.error,
@@ -126,49 +204,112 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: Spacing[6],
   },
-  backBtn: {
-    marginTop: Spacing[3],
-  },
-  backText: {
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSizes.base,
-  },
+  backBtn: { marginTop: Spacing[3] },
+  backText: { color: Colors.textSecondary, fontSize: Typography.fontSizes.base },
+
+  // ── HUD ──────────────────────────────────────────────────
   hud: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing[4],
     paddingTop: 52,
-    paddingBottom: Spacing[3],
+    paddingBottom: Spacing[2],
     backgroundColor: Colors.bg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
     gap: Spacing[3],
   },
-  hudBack: {
+  hudClose: {
     width: 32,
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hudBackText: {
-    color: Colors.textSecondary,
+  hudCloseText: {
+    color: Colors.textMuted,
     fontSize: Typography.fontSizes.lg,
   },
-  hudCenter: {
-    flex: 1,
-  },
+  hudCenter: { flex: 1 },
   hudTitle: {
     color: Colors.textPrimary,
     fontSize: Typography.fontSizes.base,
-    fontWeight: Typography.fontWeights.semibold,
-    letterSpacing: Typography.letterSpacing.wide,
+    fontWeight: Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.wider,
+    textTransform: 'uppercase',
   },
-  liveIndicator: {
+  liveIndicator: { flexShrink: 0 },
+
+  // ── Presence band ─────────────────────────────────────────
+  presenceBand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
+    backgroundColor: Colors.bgSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: Spacing[3],
+  },
+  presenceLabel: {
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.accentGreen,
+    letterSpacing: Typography.letterSpacing.widest,
     flexShrink: 0,
+    // Punctul pulsant de "live"
+    textShadowColor: Colors.accentGreen,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 6,
   },
+  avatarRow: {
+    flexDirection: 'row',
+    gap: Spacing[3],
+    alignItems: 'center',
+  },
+  avatarWrap: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  avatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 4,             // pătrat — stil sticker
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 3,
+  },
+  avatarText: {
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+  },
+  avatarName: {
+    fontSize: 9,
+    color: Colors.textMuted,
+    fontWeight: Typography.fontWeights.bold,
+    letterSpacing: 0.5,
+    maxWidth: 36,
+    textAlign: 'center',
+  },
+  avatarExtra: {
+    backgroundColor: Colors.bgCard,
+    borderColor: Colors.borderBright,
+    borderWidth: 1.5,
+  },
+  avatarExtraText: {
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.textMuted,
+  },
+
+  // ── Restul ───────────────────────────────────────────────
   panelWrap: {
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[3],
+    gap: Spacing[3],
   },
-  toolOptions: {
-    minHeight: 0,
-  },
+  toolOptions: { minHeight: 0 },
 });
