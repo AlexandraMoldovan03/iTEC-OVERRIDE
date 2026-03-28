@@ -117,6 +117,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   restoreSession: async () => {
+    // Setăm isLoading: true ca index.tsx să aștepte înainte de redirect
+    set({ isLoading: true });
+
     try {
       const result = await authService.restoreSession();
 
@@ -125,6 +128,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
           user: null,
           token: null,
           isAuthenticated: false,
+          isLoading: false,
           error: null,
         });
         return;
@@ -134,6 +138,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
         user: result.user,
         token: result.token,
         isAuthenticated: true,
+        isLoading: false,
         error: null,
       });
     } catch (e: any) {
@@ -143,6 +148,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
         user: null,
         token: null,
         isAuthenticated: false,
+        isLoading: false,
         error: null,
       });
     }

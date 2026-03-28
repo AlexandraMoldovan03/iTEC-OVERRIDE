@@ -29,7 +29,15 @@ export default function ProfileScreen() {
   const handleLogout = () => {
     Alert.alert('Leave the arena?', 'You will be logged out.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log out', style: 'destructive', onPress: () => logout() },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          // Navigăm explicit la welcome după logout
+          router.replace('/(auth)/welcome');
+        },
+      },
     ]);
   };
 

@@ -1,13 +1,9 @@
-/**
- * babel.config.js
- * Expo Router requires the expo-router/babel preset (wraps Metro).
- */
-
 module.exports = function (api) {
   api.cache(true);
   return {
     presets: ['babel-preset-expo'],
     plugins: [
+      'expo-router/babel',
       [
         'module-resolver',
         {
