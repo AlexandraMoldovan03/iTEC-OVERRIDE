@@ -1,13 +1,21 @@
 /**
  * app/(auth)/team-select.tsx
- * Crew selection — graffiti faction cards with neon glow.
+ * Crew selection — graffiti faction cards cu badge-urile echipelor.
  */
 
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  Image,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
 import { TEAMS } from '../../src/constants/teams';
+import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
 import { Team, TeamId } from '../../src/types/team';
 import { TEAM_COLORS } from '../../src/theme/colors';
 import { Button, ScreenContainer } from '../../src/components/ui';
@@ -38,7 +46,7 @@ export default function TeamSelectScreen() {
     setLocalError('');
 
     const username = getParamValue(params.username).trim();
-    const email = getParamValue(params.email).trim();
+    const email    = getParamValue(params.email).trim();
     const password = getParamValue(params.password);
 
     if (!username || !email || !password) {
@@ -61,6 +69,7 @@ export default function TeamSelectScreen() {
 
   return (
     <ScreenContainer scrollable padded>
+
       {/* ── Header ───────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.step}>STEP 2 OF 2</Text>
@@ -75,61 +84,82 @@ export default function TeamSelectScreen() {
       {/* ── Team cards ───────────────────────────────────── */}
       <View style={styles.cards}>
         {TEAMS.map((team: Team) => {
-          const tc = TEAM_COLORS[team.id as TeamId];
+          const tc         = TEAM_COLORS[team.id as TeamId];
           const isSelected = selectedTeam === team.id;
+          const badgeImg   = TEAM_BADGE_IMAGES[team.id as TeamId];
 
           return (
             <TouchableOpacity
               key={team.id}
               onPress={() => setSelectedTeam(team.id as TeamId)}
-              activeOpacity={0.8}
+              activeOpacity={0.85}
               style={[
                 styles.card,
                 isSelected && {
-                  borderColor: tc.primary,
+                  borderColor:    tc.primary,
                   backgroundColor: `${tc.primary}12`,
-                  shadowColor: tc.glow,
-                  shadowOpacity: 0.6,
-                  shadowRadius: 14,
-                  elevation: 8,
+                  shadowColor:    tc.glow,
+                  shadowOpacity:  0.7,
+                  shadowRadius:   18,
+                  elevation:      10,
                 },
               ]}
             >
-              {/* Selection indicator */}
-              <View
-                style={[
-                  styles.selectionDot,
-                  isSelected && {
-                    backgroundColor: tc.primary,
-                    borderColor: tc.primary,
-                    shadowColor: tc.glow,
-                    shadowOpacity: 1,
-                    shadowRadius: 6,
-                  },
-                ]}
-              >
-                {isSelected && <Text style={styles.dotCheck}>✓</Text>}
+              {/* ── Badge imagine echipă ────────────────── */}
+              <View style={[
+                styles.badgeWrap,
+                isSelected && {
+                  shadowColor:   tc.glow,
+                  shadowOpacity: 1,
+                  shadowRadius:  16,
+                },
+              ]}>
+                <Image
+                  source={badgeImg}
+                  style={styles.badgeImage}
+                  resizeMode="contain"
+                />
+                {/* Inel de selecție glow în jurul badge-ului */}
+                {isSelected && (
+                  <View style={[
+                    styles.selectedRing,
+                    {
+                      borderColor: tc.primary,
+                      shadowColor: tc.glow,
+                    },
+                  ]} />
+                )}
               </View>
 
+              {/* ── Info echipă ─────────────────────────── */}
               <View style={styles.cardBody}>
-                <Text style={[styles.teamName, { color: tc.primary }]}>
-                  {team.name}
-                </Text>
+                <View style={styles.nameRow}>
+                  <Text style={[styles.teamName, { color: tc.primary }]}>
+                    {team.name}
+                  </Text>
+                  {/* Checkmark selecție */}
+                  {isSelected && (
+                    <View style={[styles.checkBadge, { backgroundColor: tc.primary }]}>
+                      <Text style={styles.checkText}>✓</Text>
+                    </View>
+                  )}
+                </View>
+
                 <Text style={[styles.tagline, { color: tc.accent }]}>
                   "{team.tagline}"
                 </Text>
                 <Text style={styles.description}>{team.description}</Text>
               </View>
 
-              {/* Glow slash on right edge */}
+              {/* Glow bar pe marginea stângă */}
               <View
                 style={[
                   styles.colorBar,
                   {
                     backgroundColor: tc.primary,
-                    shadowColor: tc.glow,
-                    shadowOpacity: isSelected ? 1 : 0.4,
-                    shadowRadius: 6,
+                    shadowColor:     tc.glow,
+                    shadowOpacity:   isSelected ? 1 : 0.5,
+                    shadowRadius:    6,
                   },
                 ]}
               />
@@ -152,10 +182,10 @@ export default function TeamSelectScreen() {
           styles.joinBtn,
           selectedTeam && {
             backgroundColor: TEAM_COLORS[selectedTeam].primary,
-            borderColor: TEAM_COLORS[selectedTeam].primary,
-            shadowColor: TEAM_COLORS[selectedTeam].glow,
-            shadowOpacity: 0.7,
-            shadowRadius: 14,
+            borderColor:     TEAM_COLORS[selectedTeam].primary,
+            shadowColor:     TEAM_COLORS[selectedTeam].glow,
+            shadowOpacity:   0.7,
+            shadowRadius:    14,
           },
         ]}
       />
@@ -165,113 +195,145 @@ export default function TeamSelectScreen() {
 
 const styles = StyleSheet.create({
   header: {
-    paddingTop: Spacing[4],
+    paddingTop:    Spacing[4],
     paddingBottom: Spacing[6],
-    gap: Spacing[2],
+    gap:           Spacing[2],
   },
   step: {
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
-    color: Colors.accentYellow,
+    fontSize:      Typography.fontSizes.xs,
+    fontWeight:    Typography.fontWeights.black,
+    color:         Colors.accentYellow,
     letterSpacing: Typography.letterSpacing.widest,
     textTransform: 'uppercase',
   },
   title: {
-    fontSize: Typography.fontSizes['4xl'],
-    fontWeight: Typography.fontWeights.black,
-    color: Colors.textPrimary,
+    fontSize:    Typography.fontSizes['4xl'],
+    fontWeight:  Typography.fontWeights.black,
+    color:       Colors.textPrimary,
     letterSpacing: Typography.letterSpacing.tight,
-    lineHeight: Typography.fontSizes['4xl'] * Typography.lineHeights.tight,
+    lineHeight:  Typography.fontSizes['4xl'] * Typography.lineHeights.tight,
   },
   accentLine: {
-    height: 3,
-    width: 48,
+    height:          3,
+    width:           48,
     backgroundColor: Colors.accentYellow,
-    borderRadius: 2,
-    marginTop: Spacing[2],
-    shadowColor: Colors.accentYellow,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
+    borderRadius:    2,
+    marginTop:       Spacing[2],
+    shadowColor:     Colors.accentYellow,
+    shadowOffset:    { width: 0, height: 0 },
+    shadowOpacity:   0.8,
+    shadowRadius:    8,
   },
   subtitle: {
-    fontSize: Typography.fontSizes.sm,
-    color: Colors.textMuted,
+    fontSize:   Typography.fontSizes.sm,
+    color:      Colors.textMuted,
     lineHeight: Typography.fontSizes.sm * Typography.lineHeights.relaxed,
     letterSpacing: Typography.letterSpacing.normal,
-    marginTop: Spacing[1],
+    marginTop:  Spacing[1],
   },
+
+  // ── Cards ──────────────────────────────────────────────────
   cards: {
-    gap: Spacing[4],
+    gap:          Spacing[4],
     marginBottom: Spacing[8],
   },
   card: {
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.sm,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    padding: Spacing[4],
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    overflow: 'hidden',
+    borderRadius:    Radius.sm,
+    borderWidth:     1.5,
+    borderColor:     Colors.border,
+    flexDirection:   'row',
+    alignItems:      'center',
+    overflow:        'hidden',
+    shadowOffset:    { width: 0, height: 0 },
+    shadowOpacity:   0,
+    shadowRadius:    0,
+    padding:         Spacing[3],
+    gap:             Spacing[3],
+  },
+
+  // ── Badge ──────────────────────────────────────────────────
+  badgeWrap: {
+    width:        100,
+    height:       100,
+    flexShrink:   0,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
+    position:     'relative',
   },
-  selectionDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    marginRight: Spacing[3],
-    marginTop: 2,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+  badgeImage: {
+    width:  100,
+    height: 100,
+  },
+  selectedRing: {
+    position:     'absolute',
+    top:          -4,
+    left:         -4,
+    right:        -4,
+    bottom:       -4,
+    borderRadius: 54,
+    borderWidth:  2.5,
     shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius:  10,
   },
-  dotCheck: {
-    color: Colors.black,
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
-  },
+
+  // ── Info ───────────────────────────────────────────────────
   cardBody: {
     flex: 1,
-    gap: Spacing[1],
+    gap:  Spacing[1],
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           Spacing[2],
   },
   teamName: {
-    fontSize: Typography.fontSizes.xl,
-    fontWeight: Typography.fontWeights.black,
+    fontSize:      Typography.fontSizes.lg,
+    fontWeight:    Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.wider,
     textTransform: 'uppercase',
   },
+  checkBadge: {
+    width:          20,
+    height:         20,
+    borderRadius:   10,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  checkText: {
+    color:      Colors.black,
+    fontSize:   10,
+    fontWeight: Typography.fontWeights.black,
+  },
   tagline: {
-    fontSize: Typography.fontSizes.sm,
-    fontStyle: 'italic',
-    marginBottom: Spacing[1],
+    fontSize:   Typography.fontSizes.xs,
+    fontStyle:  'italic',
     fontWeight: Typography.fontWeights.semibold,
   },
   description: {
-    fontSize: Typography.fontSizes.sm,
-    color: Colors.textSecondary,
-    lineHeight: Typography.fontSizes.sm * Typography.lineHeights.relaxed,
+    fontSize:   Typography.fontSizes.xs,
+    color:      Colors.textSecondary,
+    lineHeight: Typography.fontSizes.xs * Typography.lineHeights.relaxed,
   },
+
+  // ── Left glow bar ──────────────────────────────────────────
   colorBar: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 4,
-    bottom: 0,
+    top:      0,
+    left:     0,
+    width:    4,
+    bottom:   0,
     shadowOffset: { width: 0, height: 0 },
   },
+
+  // ── Bottom ─────────────────────────────────────────────────
   error: {
-    color: Colors.error,
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.bold,
-    textAlign: 'center',
+    color:         Colors.error,
+    fontSize:      Typography.fontSizes.xs,
+    fontWeight:    Typography.fontWeights.bold,
+    textAlign:     'center',
     letterSpacing: Typography.letterSpacing.wide,
-    marginBottom: Spacing[4],
+    marginBottom:  Spacing[4],
   },
   joinBtn: {
     marginBottom: Spacing[8],

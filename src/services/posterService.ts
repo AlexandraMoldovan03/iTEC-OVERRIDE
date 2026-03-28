@@ -1,57 +1,176 @@
 /**
  * src/services/posterService.ts
- * Service for fetching poster data and submitting mural contributions.
- * Mock implementation — replace fetch calls with real API endpoints.
+ * Serviciu real conectat la Supabase.
+ *
+ * Tabel mural_layers → persistă toate desenele permanent.
+ * Tabel posters      → date de poster (cu fallback la mock până e populat).
+ *
+ * Schema Supabase așteptată → vezi supabase_migration.sql
  */
 
+import { supabase } from '../lib/supabase';
 import { Poster } from '../types/poster';
 import { PosterLayerItem } from '../types/mural';
-import { MOCK_POSTERS, MOCK_LAYERS, getPosterById, getPosterByAnchor, getLayersForPoster } from '../mock';
+import { TeamId } from '../types/team';
+import { getPosterById, getPosterByAnchor, MOCK_POSTERS } from '../mock';
 
-const delay = (ms = 600) => new Promise((r) => setTimeout(r, ms));
+// ─── Mapare rânduri DB → tipuri TypeScript ────────────────────────────────────
+
+function mapDbLayer(row: Record<string, any>): PosterLayerItem {
+  return {
+    id:             row.id,
+    posterId:       row.poster_id,
+    authorId:       row.author_id,
+    authorUsername: row.author_username,
+    teamId:         row.team_id as TeamId,
+    data:           row.data,
+    createdAt:      row.created_at,
+  };
+}
+
+function mapDbPoster(row: Record<string, any>): Poster {
+  return {
+    id:           row.id,
+    name:         row.name,
+    anchorCode:   row.anchor_code,
+    dimensions:   row.dimensions   ?? { widthMm: 420, heightMm: 594 },
+    location:     row.location     ?? undefined,
+    territory:    row.territory    ?? {
+      ownerTeamId:           null,
+      scores:                {},
+      heat:                  0,
+      lastActivityAt:        new Date().toISOString(),
+      recentContributorIds:  [],
+    },
+    createdAt:    row.created_at,
+    thumbnailUri: row.thumbnail_uri ?? undefined,
+  };
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────────
 
 export const posterService = {
-  /** Resolve a poster from an anchor code (QR/barcode scan result) */
+
+  /**
+   * Rezolvă un poster dintr-un anchor code (QR scan).
+   * Caută mai întâi în Supabase, apoi cade back pe mock.
+   */
   async resolveByAnchor(anchorCode: string): Promise<Poster | null> {
-    await delay(500);
+    const { data, error } = await supabase
+      .from('posters')
+      .select('*')
+      .eq('anchor_code', anchorCode)
+      .single();
+
+    if (data && !error) return mapDbPoster(data);
+    // Fallback la mock (pentru development / demo)
     return getPosterByAnchor(anchorCode) ?? null;
   },
 
-  /** Fetch full poster details by ID */
+  /**
+   * Fetch detalii poster după ID.
+   * Caută în Supabase, fallback la mock.
+   */
   async fetchPoster(posterId: string): Promise<Poster | null> {
-    await delay();
+    const { data, error } = await supabase
+      .from('posters')
+      .select('*')
+      .eq('id', posterId)
+      .single();
+
+    if (data && !error) return mapDbPoster(data);
+    // Fallback la mock
     return getPosterById(posterId) ?? null;
   },
 
-  /** Fetch all known posters (for world map / vault) */
+  /**
+   * Fetch toate posterele (home screen, vault).
+   * Supabase first, fallback la mock.
+   */
   async fetchAll(): Promise<Poster[]> {
-    await delay(400);
+    const { data, error } = await supabase
+      .from('posters')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (data && !error && data.length > 0) return data.map(mapDbPoster);
+    // Fallback la mock dacă tabela e goală sau nu există încă
     return [...MOCK_POSTERS];
   },
 
-  /** Fetch existing mural layers for a poster */
+  /**
+   * ⚡ CRITICĂ: Fetch layere dintr-un poster — mereu din Supabase.
+   * Acestea sunt desenele persistate. Dacă tabela nu există → [] (canvas gol).
+   */
   async fetchLayers(posterId: string): Promise<PosterLayerItem[]> {
-    await delay(700);
-    return getLayersForPoster(posterId);
+    const { data, error } = await supabase
+      .from('mural_layers')
+      .select('*')
+      .eq('poster_id', posterId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('[posterService] fetchLayers error:', error.message);
+      // Dacă tabela nu există deloc, returnăm array gol fără crash
+      return [];
+    }
+
+    return (data ?? []).map(mapDbLayer);
   },
 
-  /** Submit a new layer item drawn by the current user */
-  async submitLayer(item: Omit<PosterLayerItem, 'id' | 'createdAt'>): Promise<PosterLayerItem> {
-    await delay(300);
-    const persisted: PosterLayerItem = {
-      ...item,
-      id: `layer_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      createdAt: new Date().toISOString(),
-    };
-    // In a real app: POST /layers and return the server response
-    MOCK_LAYERS.push(persisted);
-    return persisted;
+  /**
+   * ⚡ CRITICĂ: Salvează un layer nou permanent în Supabase.
+   * Fără aceasta, desenele se pierd la restart.
+   */
+  async submitLayer(
+    item: Omit<PosterLayerItem, 'id' | 'createdAt'>
+  ): Promise<PosterLayerItem> {
+    const { data, error } = await supabase
+      .from('mural_layers')
+      .insert({
+        poster_id:       item.posterId,
+        author_id:       item.authorId,
+        author_username: item.authorUsername,
+        team_id:         item.teamId,
+        data:            item.data,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[posterService] submitLayer error:', error.message);
+      throw new Error(`Nu s-a putut salva desenul: ${error.message}`);
+    }
+
+    return mapDbLayer(data);
   },
 
-  /** Delete a layer item (only allowed by item author or moderator) */
+  /**
+   * Șterge un layer (doar autorul poate șterge propriile layere — RLS).
+   */
   async deleteLayer(layerId: string): Promise<void> {
-    await delay(200);
-    const idx = MOCK_LAYERS.findIndex((l) => l.id === layerId);
-    if (idx !== -1) MOCK_LAYERS.splice(idx, 1);
+    const { error } = await supabase
+      .from('mural_layers')
+      .delete()
+      .eq('id', layerId);
+
+    if (error) {
+      console.error('[posterService] deleteLayer error:', error.message);
+    }
+  },
+
+  /**
+   * Actualizează territory-ul unui poster în DB (după fiecare calcul de scor).
+   * Silențios dacă nu există rândul — posters mock nu sunt în DB.
+   */
+  async updateTerritory(
+    posterId: string,
+    territory: Poster['territory']
+  ): Promise<void> {
+    await supabase
+      .from('posters')
+      .update({ territory })
+      .eq('id', posterId);
+    // Ignorăm eroarea — poate fi poster mock care nu e în DB
   },
 };

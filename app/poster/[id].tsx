@@ -33,25 +33,31 @@ import { Colors, Spacing, Typography, Radius } from '../../src/theme';
 import { TEAM_COLORS } from '../../src/theme/colors';
 import { TeamId } from '../../src/types/team';
 import { OnlineUser } from '../../src/services/wsService';
+import { Image } from 'react-native';
+import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
 
-// ─── Avatar utilizator online ─────────────────────────────────────────────────
+// ─── Avatar utilizator online (cu badge imagine mic) ─────────────────────────
 
 function UserAvatar({ user }: { user: OnlineUser }) {
-  const tc = TEAM_COLORS[user.teamId as TeamId];
-  const initial = (user.username?.[0] ?? '?').toUpperCase();
+  const tc       = TEAM_COLORS[user.teamId as TeamId];
+  const badgeImg = TEAM_BADGE_IMAGES[user.teamId as TeamId];
 
   return (
     <View
       style={[
         styles.avatar,
         {
-          backgroundColor: tc.primary + '22',
-          borderColor: tc.primary,
-          shadowColor: tc.glow,
+          backgroundColor: tc.primary + '15',
+          borderColor:     tc.primary,
+          shadowColor:     tc.glow,
         },
       ]}
     >
-      <Text style={[styles.avatarText, { color: tc.primary }]}>{initial}</Text>
+      <Image
+        source={badgeImg}
+        style={styles.avatarBadge}
+        resizeMode="contain"
+      />
     </View>
   );
 }
@@ -271,20 +277,21 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   avatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 4,             // pătrat — stil sticker
-    borderWidth: 1.5,
-    alignItems: 'center',
+    width:          36,
+    height:         36,
+    borderRadius:   18,           // circular — badge rotund
+    borderWidth:    1.5,
+    alignItems:     'center',
     justifyContent: 'center',
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 3,
+    shadowOpacity:  0.6,
+    shadowRadius:   6,
+    shadowOffset:   { width: 0, height: 0 },
+    elevation:      4,
+    overflow:       'hidden',
   },
-  avatarText: {
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
+  avatarBadge: {
+    width:  34,
+    height: 34,
   },
   avatarName: {
     fontSize: 9,

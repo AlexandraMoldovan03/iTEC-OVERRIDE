@@ -1,85 +1,66 @@
-/**
- * app/(main)/_layout.tsx
- * Tab bar layout — graffiti black bar with neon active state.
- */
-
 import { Tabs } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Colors, Typography } from '../../src/theme';
-import { Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors } from '../../src/theme';
 
-type IconName =
-  | 'home-outline' | 'home'
-  | 'map-outline' | 'map'
-  | 'account-outline' | 'account'
-  | 'archive-outline' | 'archive';
-
-interface TabIconProps {
-  name: IconName;
-  color: string;
-  size: number;
-}
-
-function TabIcon({ name, color, size }: TabIconProps) {
-  return <MaterialCommunityIcons name={name} size={size} color={color} />;
-}
-
-export default function MainLayout() {
+export default function MainTabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: Colors.bgSurface,
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 8,
-          paddingTop: 8,
-          height: Platform.OS === 'ios' ? 82 : 60,
+          backgroundColor: '#050505',
+          borderTopColor: 'rgba(255,255,255,0.08)',
         },
         tabBarActiveTintColor: Colors.accentPurple,
-        tabBarInactiveTintColor: Colors.textMuted,
-        tabBarLabelStyle: {
-          fontSize: Typography.fontSizes.xs,
-          fontWeight: Typography.fontWeights.black as any,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-        },
+        tabBarInactiveTintColor: '#6E6E73',
       }}
     >
       <Tabs.Screen
         name="home"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? 'home' : 'home-outline'} color={color} size={22} />
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home" size={size} color={color} />
           ),
         }}
       />
+
       <Tabs.Screen
         name="map"
         options={{
           title: 'Map',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? 'map' : 'map-outline'} color={color} size={22} />
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map" size={size} color={color} />
           ),
         }}
       />
+
+      <Tabs.Screen
+        name="wall"
+        options={{
+          title: 'Wall',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="images" size={size} color={color} />
+          ),
+        }}
+      />
+
       <Tabs.Screen
         name="vault"
         options={{
           title: 'Vault',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? 'archive' : 'archive-outline'} color={color} size={22} />
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="archive" size={size} color={color} />
           ),
         }}
       />
+
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? 'account' : 'account-outline'} color={color} size={22} />
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person" size={size} color={color} />
           ),
         }}
       />
