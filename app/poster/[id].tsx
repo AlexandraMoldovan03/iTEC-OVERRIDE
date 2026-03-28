@@ -14,7 +14,7 @@
  *   [Bottom toolbar: mural tools]
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -22,39 +22,49 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   ScrollView,
+  Image,
+  Vibration,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Image } from 'react-native';
 
-import { usePosterRoom }       from '../../src/hooks/usePosterRoom';
-import { useMuralToolStore }   from '../../src/stores/muralToolStore';
-import { useVaultStore }       from '../../src/stores/vaultStore';
-import { useAuthStore }        from '../../src/stores/authStore';
-import { posterService }       from '../../src/services/posterService';
+import { usePosterRoom } from '../../src/hooks/usePosterRoom';
+import { useMuralToolStore } from '../../src/stores/muralToolStore';
+import { useVaultStore } from '../../src/stores/vaultStore';
+import { useAuthStore } from '../../src/stores/authStore';
+import { usePosterStore } from '../../src/stores/posterStore';
+import { posterService } from '../../src/services/posterService';
 
-import { PosterAnchorView }  from '../../src/components/poster/PosterAnchorView';
-import { TerritoryPanel }    from '../../src/components/poster/TerritoryPanel';
-import { MuralToolbar }      from '../../src/components/mural/MuralToolbar';
-import { ColorPicker }       from '../../src/components/mural/ColorPicker';
-import { StickerPicker }     from '../../src/components/mural/StickerPicker';
-import { LiveIndicator }     from '../../src/components/ui/LiveIndicator';
-import { LeaderboardPanel }  from '../../src/components/poster/LeaderboardPanel';
-import { Button }            from '../../src/components/ui/Button';
+import { PosterAnchorView } from '../../src/components/poster/PosterAnchorView';
+import { TerritoryPanel } from '../../src/components/poster/TerritoryPanel';
+import { LeaderboardPanel } from '../../src/components/poster/LeaderboardPanel';
+import { LeaderAlert } from '../../src/components/poster/LeaderAlert';
+import { MuralToolbar } from '../../src/components/mural/MuralToolbar';
+import { ColorPicker } from '../../src/components/mural/ColorPicker';
+import { StickerPicker } from '../../src/components/mural/StickerPicker';
+import { LiveIndicator } from '../../src/components/ui/LiveIndicator';
+import { Button } from '../../src/components/ui/Button';
 
-import { Colors, Spacing, Typography, Radius } from '../../src/theme';
-import { TEAM_COLORS }       from '../../src/theme/colors';
-import { TeamId }            from '../../src/types/team';
-import { OnlineUser }        from '../../src/services/wsService';
+import { Colors, Spacing, Typography } from '../../src/theme';
+import { TEAM_COLORS } from '../../src/theme/colors';
+import { TeamId } from '../../src/types/team';
+import { OnlineUser } from '../../src/services/wsService';
 import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
+
+// ─── Assets alertă ────────────────────────────────────────────────────────────
+
+const CAT_ALERT_1 = require('../_layout/cat1.png');
+const CAT_ALERT_2 = require('../_layout/cat2.png');
 
 // ─── Avatar utilizator online ─────────────────────────────────────────────────
 
 const TEAM_INITIALS: Record<string, string> = {
-  minimalist: 'M', perfectionist: 'P', chaotic: 'C',
+  minimalist: 'M',
+  perfectionist: 'P',
+  chaotic: 'C',
 };
 
 function UserAvatar({ user }: { user: OnlineUser }) {
-  const tc       = TEAM_COLORS[user.teamId as TeamId];
+  const tc = TEAM_COLORS[user.teamId as TeamId];
   const badgeImg = TEAM_BADGE_IMAGES[user.teamId as TeamId];
   const [imgErr, setImgErr] = React.useState(false);
 
@@ -64,8 +74,8 @@ function UserAvatar({ user }: { user: OnlineUser }) {
         styles.avatar,
         {
           backgroundColor: tc.primary + '15',
-          borderColor:     tc.primary,
-          shadowColor:     tc.glow,
+          borderColor: tc.primary,
+          shadowColor: tc.glow,
         },
       ]}
     >
@@ -116,17 +126,15 @@ function ScanGateScreen({ onScan, onBack }: { onScan: () => void; onBack: () => 
 
 // ─── Ecran principal ──────────────────────────────────────────────────────────
 
-// Possible gate states
 type GateState = 'checking' | 'granted' | 'denied';
 
 export default function PosterRoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  const user      = useAuthStore((s) => s.user);
+  const user = useAuthStore((s) => s.user);
   const vaultStore = useVaultStore();
 
-  // ── Scan gate ─────────────────────────────────────────────────────────────
   const [gateState, setGateState] = useState<GateState>('checking');
 
   useEffect(() => {
@@ -135,24 +143,22 @@ export default function PosterRoomScreen() {
       return;
     }
 
-    // Fast path: check in-memory vault first (instant, no network)
     if (vaultStore.hasScanned(id)) {
       setGateState('granted');
       return;
     }
 
-    // Slow path: check Supabase (handles case where vault wasn't loaded yet
-    // or user navigated directly via deep link)
     let cancelled = false;
+
     posterService.hasUserScannedPoster(user.id, id).then((scanned) => {
       if (cancelled) return;
       setGateState(scanned ? 'granted' : 'denied');
     });
 
-    return () => { cancelled = true; };
-  }, [id, user?.id]);
-
-  // ── Render gate screens ───────────────────────────────────────────────────
+    return () => {
+      cancelled = true;
+    };
+  }, [id, user?.id, vaultStore]);
 
   if (gateState === 'checking') {
     return (
@@ -172,11 +178,10 @@ export default function PosterRoomScreen() {
     );
   }
 
-  // ── Gate passed → render battle room ─────────────────────────────────────
   return <BattleRoom id={id} />;
 }
 
-// ─── Battle room (renderizat doar după gate) ──────────────────────────────────
+// ─── Battle room ──────────────────────────────────────────────────────────────
 
 function BattleRoom({ id }: { id: string }) {
   const router = useRouter();
@@ -192,6 +197,93 @@ function BattleRoom({ id }: { id: string }) {
   } = usePosterRoom(id);
 
   const activeTool = useMuralToolStore((s) => s.activeTool);
+  const user = useAuthStore((s) => s.user);
+
+  const playerScores = usePosterStore((s) => s.playerScores);
+  const teamScores = usePosterStore((s) => s.teamScores);
+
+  const [showLostLeadAlert, setShowLostLeadAlert] = useState(false);
+  const [catVariant, setCatVariant] = useState<1 | 2>(1);
+  const [alertText, setAlertText] = useState('Someone just passed you and took 1st place.');
+
+  const prevLeaderUserIdRef = useRef<string | null>(null);
+  const prevLeaderTeamIdRef = useRef<string | null>(null);
+  const alertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const currentLeaderPlayer = playerScores[0] ?? null;
+  const currentLeaderUserId = currentLeaderPlayer?.userId ?? null;
+
+  const currentLeaderTeam = teamScores[0] ?? null;
+  const currentLeaderTeamId = currentLeaderTeam?.teamId ?? null;
+
+  const myUserId = user?.id ?? null;
+  const myTeamId = (user?.teamId as TeamId | undefined) ?? null;
+
+  const triggerLeadLostAlert = (message: string) => {
+    setCatVariant((v) => (v === 1 ? 2 : 1));
+    setAlertText(message);
+    setShowLostLeadAlert(true);
+
+    Vibration.vibrate([0, 140, 90, 180]);
+
+    if (alertTimerRef.current) {
+      clearTimeout(alertTimerRef.current);
+    }
+
+    alertTimerRef.current = setTimeout(() => {
+      setShowLostLeadAlert(false);
+    }, 2600);
+  };
+
+  useEffect(() => {
+    if (!myUserId || !currentLeaderUserId) {
+      prevLeaderUserIdRef.current = currentLeaderUserId;
+      return;
+    }
+
+    const prevLeaderUserId = prevLeaderUserIdRef.current;
+
+    const iLostPlayerLead =
+      prevLeaderUserId === myUserId &&
+      currentLeaderUserId !== myUserId &&
+      currentLeaderUserId !== prevLeaderUserId;
+
+    if (iLostPlayerLead) {
+      triggerLeadLostAlert('Someone just passed you and took 1st place.');
+    }
+
+    prevLeaderUserIdRef.current = currentLeaderUserId;
+  }, [currentLeaderUserId, myUserId]);
+
+  useEffect(() => {
+    if (!myTeamId || !currentLeaderTeamId) {
+      prevLeaderTeamIdRef.current = currentLeaderTeamId;
+      return;
+    }
+
+    const prevLeaderTeamId = prevLeaderTeamIdRef.current;
+
+    const myTeamLostLead =
+      prevLeaderTeamId === myTeamId &&
+      currentLeaderTeamId !== myTeamId &&
+      currentLeaderTeamId !== prevLeaderTeamId;
+
+    if (myTeamLostLead) {
+      triggerLeadLostAlert('Sorry... your team just lost 1st place.');
+    }
+
+    prevLeaderTeamIdRef.current = currentLeaderTeamId;
+  }, [currentLeaderTeamId, myTeamId]);
+
+  useEffect(() => {
+    return () => {
+      if (alertTimerRef.current) {
+        clearTimeout(alertTimerRef.current);
+        alertTimerRef.current = null;
+      }
+      Vibration.cancel();
+    };
+  }, []);
 
   if (error) {
     return (
@@ -214,23 +306,29 @@ function BattleRoom({ id }: { id: string }) {
   }
 
   const visibleUsers = onlineUsers.slice(0, 5);
-  const extraCount   = Math.max(0, onlineUsers.length - 5);
+  const extraCount = Math.max(0, onlineUsers.length - 5);
 
   return (
     <View style={styles.screen}>
+      <LeaderAlert
+        visible={showLostLeadAlert}
+        imageSource={catVariant === 1 ? CAT_ALERT_1 : CAT_ALERT_2}
+        title="Sorry..."
+        subtitle={alertText}
+      />
 
-      {/* ── HUD top ──────────────────────────────────────── */}
       <View style={styles.hud}>
         <TouchableOpacity onPress={() => router.back()} style={styles.hudClose}>
           <Text style={styles.hudCloseText}>✕</Text>
         </TouchableOpacity>
         <View style={styles.hudCenter}>
-          <Text style={styles.hudTitle} numberOfLines={1}>{poster.name}</Text>
+          <Text style={styles.hudTitle} numberOfLines={1}>
+            {poster.name}
+          </Text>
         </View>
         <LiveIndicator connected={wsConnected} style={styles.liveIndicator} />
       </View>
 
-      {/* ── Bandă utilizatori online ──────────────────────── */}
       {onlineUsers.length > 0 && (
         <View style={styles.presenceBand}>
           <Text style={styles.presenceLabel}>ONLINE NOW</Text>
@@ -242,7 +340,9 @@ function BattleRoom({ id }: { id: string }) {
             {visibleUsers.map((u) => (
               <View key={u.userId} style={styles.avatarWrap}>
                 <UserAvatar user={u} />
-                <Text style={styles.avatarName} numberOfLines={1}>{u.username}</Text>
+                <Text style={styles.avatarName} numberOfLines={1}>
+                  {u.username}
+                </Text>
               </View>
             ))}
             {extraCount > 0 && (
@@ -254,12 +354,10 @@ function BattleRoom({ id }: { id: string }) {
         </View>
       )}
 
-      {/* ── Poster canvas ─────────────────────────────────── */}
       <PosterAnchorView poster={poster} layers={isLoadingLayers ? [] : layers} />
 
-      {/* ── Panels scrollabili ────────────────────────────── */}
       <View style={styles.panelWrap}>
-        <LeaderboardPanel />
+        <LeaderboardPanel myTeamId={myTeamId} />
         <TerritoryPanel
           territory={poster.territory}
           wsConnected={wsConnected}
@@ -267,7 +365,6 @@ function BattleRoom({ id }: { id: string }) {
         />
       </View>
 
-      {/* ── Tool options contextual ───────────────────────── */}
       <View style={styles.toolOptions}>
         {(activeTool === 'brush' || activeTool === 'spray' || activeTool === 'glow') && (
           <ColorPicker />
@@ -275,7 +372,6 @@ function BattleRoom({ id }: { id: string }) {
         {activeTool === 'sticker' && <StickerPicker />}
       </View>
 
-      {/* ── Toolbar desen ────────────────────────────────── */}
       <MuralToolbar />
     </View>
   );
@@ -307,10 +403,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: Spacing[6],
   },
-  backBtn:  { marginTop: Spacing[3] },
-  backText: { color: Colors.textSecondary, fontSize: Typography.fontSizes.base },
+  backBtn: {
+    marginTop: Spacing[3],
+  },
+  backText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.base,
+  },
 
-  // ── Gate screen ──────────────────────────────────────────────
   gateScreen: {
     flex: 1,
     backgroundColor: Colors.bg,
@@ -361,7 +461,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSizes.sm,
   },
 
-  // ── HUD ──────────────────────────────────────────────────────
   hud: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -383,7 +482,9 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: Typography.fontSizes.lg,
   },
-  hudCenter: { flex: 1 },
+  hudCenter: {
+    flex: 1,
+  },
   hudTitle: {
     color: Colors.textPrimary,
     fontSize: Typography.fontSizes.base,
@@ -391,9 +492,10 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.wider,
     textTransform: 'uppercase',
   },
-  liveIndicator: { flexShrink: 0 },
+  liveIndicator: {
+    flexShrink: 0,
+  },
 
-  // ── Presence band ─────────────────────────────────────────────
   presenceBand: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -424,20 +526,20 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   avatar: {
-    width:          36,
-    height:         36,
-    borderRadius:   18,
-    borderWidth:    1.5,
-    alignItems:     'center',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity:  0.6,
-    shadowRadius:   6,
-    shadowOffset:   { width: 0, height: 0 },
-    elevation:      4,
-    overflow:       'hidden',
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+    overflow: 'hidden',
   },
   avatarBadge: {
-    width:  34,
+    width: 34,
     height: 34,
   },
   avatarName: {
@@ -459,11 +561,12 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // ── Restul ───────────────────────────────────────────────────
   panelWrap: {
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[3],
     gap: Spacing[3],
   },
-  toolOptions: { minHeight: 0 },
+  toolOptions: {
+    minHeight: 0,
+  },
 });

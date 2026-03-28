@@ -31,35 +31,46 @@ import { TeamId } from '../../types/team';
 // ─── Etichetă echipă ──────────────────────────────────────────────────────────
 
 const TEAM_LABELS: Record<TeamId, string> = {
-  minimalist:   'MIN',
+  minimalist: 'MIN',
   perfectionist: 'PERF',
-  chaotic:      'CHAO',
+  chaotic: 'CHAO',
 };
 
-const RANK_COLORS = ['#FFE600', '#AAAAAA', '#FF6B00'];  // gold, silver, bronze
+const RANK_COLORS = ['#FFE600', '#AAAAAA', '#FF6B00'];
 
 // ─── Rând echipă ──────────────────────────────────────────────────────────────
 
-function TeamRow({ ts }: { ts: TeamScore }) {
+function TeamRow({
+  ts,
+  myTeamId,
+}: {
+  ts: TeamScore;
+  myTeamId?: TeamId | null;
+}) {
   const tc = TEAM_COLORS[ts.teamId as TeamId];
   const rankColor = RANK_COLORS[ts.rank - 1] ?? Colors.textMuted;
-  const isLeader  = ts.rank === 1;
+  const isLeader = ts.rank === 1;
+  const isMyTeam = myTeamId === ts.teamId;
 
   return (
-    <View style={[styles.row, isLeader && styles.rowLeader]}>
-      {/* Rank badge */}
+    <View
+      style={[
+        styles.row,
+        isLeader && styles.rowLeader,
+        isMyTeam && styles.rowMyTeam,
+      ]}
+    >
       <View style={[styles.rankBadge, { backgroundColor: rankColor + '22', borderColor: rankColor }]}>
         <Text style={[styles.rankText, { color: rankColor }]}>#{ts.rank}</Text>
       </View>
 
-      {/* Culoare echipă + etichetă */}
       <View
         style={[
           styles.teamDot,
           {
             backgroundColor: tc.primary + '33',
-            borderColor:     tc.primary,
-            shadowColor:     tc.glow,
+            borderColor: tc.primary,
+            shadowColor: tc.glow,
           },
         ]}
       >
@@ -68,7 +79,6 @@ function TeamRow({ ts }: { ts: TeamScore }) {
         </Text>
       </View>
 
-      {/* Puncte */}
       <View style={styles.rowRight}>
         <Text style={[styles.points, { color: isLeader ? Colors.accentYellow : Colors.textPrimary }]}>
           {ts.points}
@@ -85,32 +95,31 @@ function TeamRow({ ts }: { ts: TeamScore }) {
 function PlayerRow({ ps }: { ps: PlayerScore }) {
   const tc = TEAM_COLORS[ps.teamId as TeamId];
   const rankColor = RANK_COLORS[ps.rank - 1] ?? Colors.textMuted;
-  const isLeader  = ps.rank === 1;
-  const initial   = (ps.username?.[0] ?? '?').toUpperCase();
+  const isLeader = ps.rank === 1;
+  const initial = (ps.username?.[0] ?? '?').toUpperCase();
 
   return (
     <View style={[styles.row, isLeader && styles.rowLeader]}>
-      {/* Rank badge */}
       <View style={[styles.rankBadge, { backgroundColor: rankColor + '22', borderColor: rankColor }]}>
         <Text style={[styles.rankText, { color: rankColor }]}>#{ps.rank}</Text>
       </View>
 
-      {/* Avatar */}
       <View
         style={[
           styles.playerAvatar,
           {
             backgroundColor: tc.primary + '22',
-            borderColor:     tc.primary,
-            shadowColor:     tc.glow,
+            borderColor: tc.primary,
+            shadowColor: tc.glow,
           },
         ]}
       >
         <Text style={[styles.playerInitial, { color: tc.primary }]}>{initial}</Text>
       </View>
 
-      {/* Username + puncte */}
-      <Text style={styles.playerName} numberOfLines={1}>{ps.username}</Text>
+      <Text style={styles.playerName} numberOfLines={1}>
+        {ps.username}
+      </Text>
 
       <View style={styles.rowRight}>
         <Text style={[styles.points, { color: isLeader ? Colors.accentYellow : Colors.textPrimary }]}>
@@ -124,14 +133,17 @@ function PlayerRow({ ps }: { ps: PlayerScore }) {
 
 // ─── Panel principal ──────────────────────────────────────────────────────────
 
-export function LeaderboardPanel() {
-  const teamScores   = usePosterStore((s) => s.teamScores);
+interface LeaderboardPanelProps {
+  myTeamId?: TeamId | null;
+}
+
+export function LeaderboardPanel({ myTeamId = null }: LeaderboardPanelProps) {
+  const teamScores = usePosterStore((s) => s.teamScores);
   const playerScores = usePosterStore((s) => s.playerScores);
 
   const [collapsed, setCollapsed] = useState(false);
-  const animHeight = useRef(new Animated.Value(1)).current;   // 1 = expanded
+  const animHeight = useRef(new Animated.Value(1)).current;
 
-  // Animație colapsat/expandat
   const toggle = () => {
     const toValue = collapsed ? 1 : 0;
     Animated.spring(animHeight, {
@@ -143,57 +155,55 @@ export function LeaderboardPanel() {
     setCollapsed(!collapsed);
   };
 
-  // Top 3 echipe, top 5 jucători
-  const topTeams   = teamScores.slice(0, 3);
+  const topTeams = teamScores.slice(0, 3);
   const topPlayers = playerScores.slice(0, 5);
 
   const hasData = topTeams.length > 0 || topPlayers.length > 0;
 
-  // Puls pentru liderul curent
   const pulseAnim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.05, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1,    duration: 700, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
       ])
     );
     pulse.start();
     return () => pulse.stop();
-  }, []);
+  }, [pulseAnim]);
 
   if (!hasData) return null;
 
   const maxBodyHeight = animHeight.interpolate({
-    inputRange:  [0, 1],
+    inputRange: [0, 1],
     outputRange: [0, 400],
   });
 
   return (
     <View style={styles.container}>
-
-      {/* ── Header ─────────────────────────────────────────── */}
       <TouchableOpacity style={styles.header} onPress={toggle} activeOpacity={0.8}>
         <View style={styles.headerLeft}>
-          {/* Punct pulsant "live" */}
           <Animated.View style={[styles.liveDot, { transform: [{ scale: pulseAnim }] }]} />
           <Text style={styles.headerTitle}>LEADERBOARD</Text>
         </View>
 
-        {/* Scorul lider echipă — afișat mereu în header */}
         {topTeams[0] && (
           <View style={styles.headerScore}>
             <View
               style={[
                 styles.leaderDot,
-                { backgroundColor: TEAM_COLORS[topTeams[0].teamId as TeamId].primary + '44',
-                  borderColor:     TEAM_COLORS[topTeams[0].teamId as TeamId].primary },
+                {
+                  backgroundColor: TEAM_COLORS[topTeams[0].teamId as TeamId].primary + '44',
+                  borderColor: TEAM_COLORS[topTeams[0].teamId as TeamId].primary,
+                },
               ]}
             >
-              <Text style={[
-                styles.leaderDotText,
-                { color: TEAM_COLORS[topTeams[0].teamId as TeamId].primary }
-              ]}>
+              <Text
+                style={[
+                  styles.leaderDotText,
+                  { color: TEAM_COLORS[topTeams[0].teamId as TeamId].primary },
+                ]}
+              >
                 {TEAM_LABELS[topTeams[0].teamId] ?? '?'}
               </Text>
             </View>
@@ -204,46 +214,37 @@ export function LeaderboardPanel() {
         <Text style={styles.chevron}>{collapsed ? '▼' : '▲'}</Text>
       </TouchableOpacity>
 
-      {/* ── Body animat ────────────────────────────────────── */}
       <Animated.View style={[styles.body, { maxHeight: maxBodyHeight, overflow: 'hidden' }]}>
-
         <View style={styles.columns}>
-
-          {/* Coloana echipe */}
           <View style={styles.column}>
-            <Text style={styles.columnTitle}>ECHIPE</Text>
+            <Text style={styles.columnTitle}>TEAMS</Text>
             {topTeams.map((ts) => (
-              <TeamRow key={ts.teamId} ts={ts} />
+              <TeamRow key={ts.teamId} ts={ts} myTeamId={myTeamId} />
             ))}
             {topTeams.length === 0 && (
-              <Text style={styles.emptyText}>Niciun desen încă</Text>
+              <Text style={styles.emptyText}>No team score yet</Text>
             )}
           </View>
 
-          {/* Separator */}
           <View style={styles.separator} />
 
-          {/* Coloana jucători */}
           <View style={[styles.column, { flex: 1.3 }]}>
-            <Text style={styles.columnTitle}>JUCĂTORI</Text>
+            <Text style={styles.columnTitle}>PLAYERS</Text>
             {topPlayers.map((ps) => (
               <PlayerRow key={ps.userId} ps={ps} />
             ))}
             {topPlayers.length === 0 && (
-              <Text style={styles.emptyText}>Niciun jucător</Text>
+              <Text style={styles.emptyText}>No players yet</Text>
             )}
           </View>
-
         </View>
 
-        {/* Legenda punctaj */}
         <View style={styles.legend}>
           <Text style={styles.legendText}>
             brush=1pt · spray=2pt · glow=3pt · stamp=2pt · sticker=1pt
           </Text>
         </View>
       </Animated.View>
-
     </View>
   );
 }
@@ -253,202 +254,200 @@ export function LeaderboardPanel() {
 const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.bgCard,
-    borderWidth:     1,
-    borderColor:     Colors.border,
-    borderRadius:    Radius.md,
-    overflow:        'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
   },
 
-  // ── Header ─────────────────────────────────────────────────
   header: {
-    flexDirection:  'row',
-    alignItems:     'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: Spacing[3],
-    paddingVertical:   Spacing[2],
-    gap:            Spacing[2],
+    paddingVertical: Spacing[2],
+    gap: Spacing[2],
   },
   headerLeft: {
-    flex:          1,
+    flex: 1,
     flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing[2],
+    alignItems: 'center',
+    gap: Spacing[2],
   },
   liveDot: {
-    width:        7,
-    height:       7,
+    width: 7,
+    height: 7,
     borderRadius: 4,
     backgroundColor: Colors.accentGreen,
-    shadowColor:  Colors.accentGreen,
+    shadowColor: Colors.accentGreen,
     shadowOpacity: 0.9,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 0 },
   },
   headerTitle: {
-    fontSize:      Typography.fontSizes.xs,
-    fontWeight:    Typography.fontWeights.black,
-    color:         Colors.accentGreen,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.accentGreen,
     letterSpacing: Typography.letterSpacing.widest,
-    textShadowColor:  Colors.accentGreen,
+    textShadowColor: Colors.accentGreen,
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 4,
   },
   headerScore: {
     flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing[1],
+    alignItems: 'center',
+    gap: Spacing[1],
   },
   leaderDot: {
-    width:        36,
-    height:       18,
+    width: 36,
+    height: 18,
     borderRadius: Radius.sm,
-    borderWidth:  1,
-    alignItems:   'center',
+    borderWidth: 1,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   leaderDotText: {
-    fontSize:   9,
+    fontSize: 9,
     fontWeight: Typography.fontWeights.black,
     letterSpacing: 0.5,
   },
   leaderPoints: {
-    fontSize:   Typography.fontSizes.xs,
+    fontSize: Typography.fontSizes.xs,
     fontWeight: Typography.fontWeights.black,
-    color:      Colors.accentYellow,
+    color: Colors.accentYellow,
   },
   chevron: {
     fontSize: 10,
-    color:    Colors.textMuted,
-    width:    14,
+    color: Colors.textMuted,
+    width: 14,
     textAlign: 'center',
   },
 
-  // ── Body ───────────────────────────────────────────────────
   body: {
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },
   columns: {
     flexDirection: 'row',
-    padding:       Spacing[2],
-    gap:           Spacing[2],
+    padding: Spacing[2],
+    gap: Spacing[2],
   },
   column: {
     flex: 1,
-    gap:  Spacing[1],
+    gap: Spacing[1],
   },
   columnTitle: {
-    fontSize:      9,
-    fontWeight:    Typography.fontWeights.black,
-    color:         Colors.textMuted,
+    fontSize: 9,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.textMuted,
     letterSpacing: Typography.letterSpacing.widest,
-    marginBottom:  2,
+    marginBottom: 2,
   },
   separator: {
-    width:           1,
+    width: 1,
     backgroundColor: Colors.border,
-    marginVertical:  Spacing[1],
+    marginVertical: Spacing[1],
   },
 
-  // ── Rând comun ─────────────────────────────────────────────
   row: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            Spacing[1],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[1],
     paddingVertical: 3,
     paddingHorizontal: 4,
-    borderRadius:   Radius.sm,
+    borderRadius: Radius.sm,
   },
   rowLeader: {
     backgroundColor: Colors.accentYellow + '08',
-    borderWidth:     1,
-    borderColor:     Colors.accentYellow + '33',
+    borderWidth: 1,
+    borderColor: Colors.accentYellow + '33',
+  },
+  rowMyTeam: {
+    backgroundColor: Colors.accentPurple + '12',
+    borderWidth: 1,
+    borderColor: Colors.accentPurple + '33',
   },
   rankBadge: {
-    width:        24,
-    height:       16,
+    width: 24,
+    height: 16,
     borderRadius: 3,
-    borderWidth:  1,
-    alignItems:   'center',
+    borderWidth: 1,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   rankText: {
-    fontSize:   8,
+    fontSize: 8,
     fontWeight: Typography.fontWeights.black,
   },
   rowRight: {
-    marginLeft:    'auto',
-    alignItems:    'flex-end',
+    marginLeft: 'auto',
+    alignItems: 'flex-end',
   },
   points: {
-    fontSize:   Typography.fontSizes.sm,
+    fontSize: Typography.fontSizes.sm,
     fontWeight: Typography.fontWeights.black,
   },
   ptSuffix: {
-    fontSize:   8,
+    fontSize: 8,
     fontWeight: Typography.fontWeights.regular,
-    color:      Colors.textMuted,
+    color: Colors.textMuted,
   },
   layers: {
     fontSize: 8,
-    color:    Colors.textMuted,
+    color: Colors.textMuted,
   },
 
-  // ── Echipă ─────────────────────────────────────────────────
   teamDot: {
     paddingHorizontal: 5,
-    paddingVertical:   2,
-    borderRadius:      Radius.sm,
-    borderWidth:       1,
-    shadowOpacity:     0.5,
-    shadowRadius:      3,
-    shadowOffset:      { width: 0, height: 0 },
-    elevation:         2,
+    paddingVertical: 2,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 2,
   },
   teamDotText: {
-    fontSize:   8,
+    fontSize: 8,
     fontWeight: Typography.fontWeights.black,
     letterSpacing: 0.5,
   },
 
-  // ── Jucător ────────────────────────────────────────────────
   playerAvatar: {
-    width:        20,
-    height:       20,
+    width: 20,
+    height: 20,
     borderRadius: 3,
-    borderWidth:  1,
-    alignItems:   'center',
+    borderWidth: 1,
+    alignItems: 'center',
     justifyContent: 'center',
     shadowOpacity: 0.4,
-    shadowRadius:  3,
-    shadowOffset:  { width: 0, height: 0 },
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 0 },
   },
   playerInitial: {
-    fontSize:   8,
+    fontSize: 8,
     fontWeight: Typography.fontWeights.black,
   },
   playerName: {
-    flex:       1,
-    fontSize:   Typography.fontSizes.xs,
-    color:      Colors.textSecondary,
+    flex: 1,
+    fontSize: Typography.fontSizes.xs,
+    color: Colors.textSecondary,
     fontWeight: Typography.fontWeights.bold,
     letterSpacing: 0.3,
   },
 
-  // ── Legendă ────────────────────────────────────────────────
   legend: {
     paddingHorizontal: Spacing[3],
-    paddingBottom:     Spacing[2],
+    paddingBottom: Spacing[2],
   },
   legendText: {
     fontSize: 8,
-    color:    Colors.textMuted,
+    color: Colors.textMuted,
     letterSpacing: 0.3,
   },
 
-  // ── Empty ──────────────────────────────────────────────────
   emptyText: {
     fontSize: Typography.fontSizes.xs,
-    color:    Colors.textMuted,
+    color: Colors.textMuted,
     fontStyle: 'italic',
   },
 });

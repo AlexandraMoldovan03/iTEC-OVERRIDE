@@ -22,7 +22,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Svg, { Defs, Pattern, Rect } from 'react-native-svg';
+import Svg, { Defs, Pattern, Rect, Path, Circle, G, Text as SvgText } from 'react-native-svg';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useVaultStore } from '../../src/stores/vaultStore';
@@ -31,6 +31,9 @@ import { supabase }      from '../../src/lib/supabase';
 import { Poster }        from '../../src/types/poster';
 import { Colors, Spacing, Typography } from '../../src/theme';
 import { TEAM_COLORS }   from '../../src/theme/colors';
+import { PosterLayerItem, BrushStrokeItem, StickerItem, TeamStampItem } from '../../src/types/mural';
+import { TeamId }        from '../../src/types/team';
+import { posterService } from '../../src/services/posterService';
 
 // ─── Canvas constants ─────────────────────────────────────────────────────────
 
@@ -110,6 +113,136 @@ const WallPattern = React.memo(function WallPattern() {
   );
 });
 
+// ─── Tile mural overlay ───────────────────────────────────────────────────────
+
+const TILE_IMG_H = POSTER_H - 34; // image area height (below name bar)
+// Reference canvas width assumed when strokeWidth was recorded (≈ full-screen canvas)
+const CANVAS_REF_W = 350;
+const STROKE_SCALE = POSTER_W / CANVAS_REF_W; // ~0.39 — shrinks strokes to tile
+
+interface OverlayProps {
+  layers: PosterLayerItem[];
+}
+
+const TileMuralOverlay = React.memo(function TileMuralOverlay({ layers }: OverlayProps) {
+  if (!layers || layers.length === 0) return null;
+
+  const w = POSTER_W;
+  const h = TILE_IMG_H;
+
+  const toX = (nx: number) => nx * w;
+  const toY = (ny: number) => ny * h;
+
+  const toPath = (points: Array<{ x: number; y: number }>) => {
+    if (points.length < 2) return '';
+    const [first, ...rest] = points;
+    const parts = [`M ${toX(first.x).toFixed(1)} ${toY(first.y).toFixed(1)}`];
+    rest.forEach((p) => parts.push(`L ${toX(p.x).toFixed(1)} ${toY(p.y).toFixed(1)}`));
+    return parts.join(' ');
+  };
+
+  return (
+    <Svg
+      width={w}
+      height={h}
+      style={StyleSheet.absoluteFillObject}
+      pointerEvents="none"
+    >
+      {layers.map((item) => {
+        const d         = item.data;
+        const teamColor = TEAM_COLORS[item.teamId as TeamId];
+        const glowCol   = teamColor?.glow ?? '#ffffff';
+        const primCol   = teamColor?.primary ?? '#888888';
+
+        if (d.type === 'brush' || d.type === 'spray' || d.type === 'glow') {
+          const stroke = d as BrushStrokeItem;
+          const pathD  = toPath(stroke.points);
+          if (!pathD) return null;
+          const isGlow    = d.type === 'glow';
+          const glowW     = (stroke.strokeWidth + (isGlow ? 8 : 4)) * STROKE_SCALE;
+          const strokeW   = Math.max(0.8, stroke.strokeWidth * STROKE_SCALE);
+          return (
+            <G key={item.id}>
+              <Path
+                d={pathD}
+                stroke={glowCol}
+                strokeWidth={glowW}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+                opacity={0.35}
+              />
+              <Path
+                d={pathD}
+                stroke={stroke.color}
+                strokeWidth={strokeW}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+                opacity={stroke.opacity}
+              />
+            </G>
+          );
+        }
+
+        if (d.type === 'erase') {
+          const pathD = toPath(d.points);
+          if (!pathD) return null;
+          return (
+            <Path
+              key={item.id}
+              d={pathD}
+              stroke="#000000"
+              strokeWidth={Math.max(1, d.strokeWidth * STROKE_SCALE)}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+              opacity={1}
+            />
+          );
+        }
+
+        if (d.type === 'sticker') {
+          const s = d as StickerItem;
+          return (
+            <SvgText
+              key={item.id}
+              x={toX(s.position.x)}
+              y={toY(s.position.y)}
+              fontSize={Math.max(6, 11 * s.scale)}
+              textAnchor="middle"
+              rotation={s.rotation}
+              originX={toX(s.position.x)}
+              originY={toY(s.position.y)}
+            >
+              {s.emoji}
+            </SvgText>
+          );
+        }
+
+        if (d.type === 'teamStamp') {
+          const ts = d as TeamStampItem;
+          const r  = Math.max(4, 7 * ts.scale);
+          return (
+            <G key={item.id}>
+              <Circle
+                cx={toX(ts.position.x)}
+                cy={toY(ts.position.y)}
+                r={r}
+                fill={primCol + '44'}
+                stroke={primCol}
+                strokeWidth={1}
+              />
+            </G>
+          );
+        }
+
+        return null;
+      })}
+    </Svg>
+  );
+});
+
 // ─── Poster tile ──────────────────────────────────────────────────────────────
 
 interface TileProps {
@@ -120,6 +253,7 @@ interface TileProps {
   posY:        Animated.Value;
   scaleAnim:   Animated.Value;
   layerCount:  number;
+  layers:      PosterLayerItem[];
   pulseAnim:   Animated.Value;
   onDragEnd:   (id: string, x: number, y: number) => void;
   onTap:       (id: string) => void;
@@ -127,7 +261,7 @@ interface TileProps {
 
 const PosterTile = React.memo(function PosterTile({
   poster, initX, initY, posX, posY, scaleAnim,
-  layerCount, pulseAnim, onDragEnd, onTap,
+  layerCount, layers, pulseAnim, onDragEnd, onTap,
 }: TileProps) {
 
   // Always-current refs (updated inline during render)
@@ -250,17 +384,21 @@ const PosterTile = React.memo(function PosterTile({
           { borderColor: teamColor ?? 'rgba(255,255,255,0.13)' },
         ]}
       >
-        {poster.referenceImageUrl ? (
-          <Image
-            source={{ uri: poster.referenceImageUrl }}
-            style={styles.tileImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={styles.tilePlaceholder}>
-            <Text style={styles.tilePlaceholderIcon}>🖼</Text>
-          </View>
-        )}
+        <View style={styles.tileImageWrap}>
+          {poster.referenceImageUrl ? (
+            <Image
+              source={{ uri: poster.referenceImageUrl }}
+              style={StyleSheet.absoluteFillObject}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.tilePlaceholder}>
+              <Text style={styles.tilePlaceholderIcon}>🖼</Text>
+            </View>
+          )}
+          {/* Mural drawings overlay — cached from last fetch */}
+          <TileMuralOverlay layers={layers} />
+        </View>
 
         <View style={styles.tileInfo}>
           <Text style={styles.tileName} numberOfLines={1}>{poster.name}</Text>
@@ -291,6 +429,7 @@ export default function VaultScreen() {
 
   const [positions, setPositions]     = useState<Record<string, { x: number; y: number }>>({});
   const [layerCounts, setLayerCounts] = useState<Record<string, number>>({});
+  const [layersMap, setLayersMap]     = useState<Record<string, PosterLayerItem[]>>({});
   const [posReady, setPosReady]       = useState(false);
 
   // ── Animated values ───────────────────────────────────────────────────────
@@ -337,6 +476,33 @@ export default function VaultScreen() {
       setPosReady(true);
     });
   }, [posters.length, user?.id]);
+
+  // ── Fetch cached mural layers for tile overlay ────────────────────────────
+  // Loaded once when the vault opens; not real-time (cached snapshot).
+
+  useEffect(() => {
+    if (posters.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Fetch all posters in parallel — each call returns [] on error (silent)
+        const results = await Promise.all(
+          posters.map((p) =>
+            posterService.fetchLayers(p.id).catch(() => [] as PosterLayerItem[])
+          )
+        );
+        if (cancelled) return;
+        const map: Record<string, PosterLayerItem[]> = {};
+        posters.forEach((p, i) => { map[p.id] = results[i]; });
+        setLayersMap(map);
+      } catch {
+        // silently ignore — tile overlay just stays empty
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [posters.map((p) => p.id).join(',')]);
 
   // ── Realtime layer counts ─────────────────────────────────────────────────
 
@@ -474,6 +640,7 @@ export default function VaultScreen() {
                 posY={anim.y}
                 scaleAnim={anim.scale}
                 layerCount={layerCounts[poster.id] ?? 0}
+                layers={layersMap[poster.id] ?? []}
                 pulseAnim={pulse}
                 onDragEnd={handleDragEnd}
                 onTap={handleTap}
@@ -544,13 +711,15 @@ const styles = StyleSheet.create({
     borderWidth:     1,
     borderColor:     'rgba(255,255,255,0.13)',
   },
-  tileImage: {
-    width:  '100%',
-    height: POSTER_H - 34,
+  tileImageWrap: {
+    width:    '100%',
+    height:   TILE_IMG_H,
+    overflow: 'hidden',
+    position: 'relative',
   },
   tilePlaceholder: {
     width:           '100%',
-    height:          POSTER_H - 34,
+    height:          TILE_IMG_H,
     alignItems:      'center',
     justifyContent:  'center',
     backgroundColor: '#1A1A20',
