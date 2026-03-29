@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+
 import { useAuthStore } from '../../src/stores/authStore';
 import { useVaultStore } from '../../src/stores/vaultStore';
 import { PosterCard } from '../../src/components/poster/PosterCard';
@@ -17,11 +18,84 @@ import { TeamBadge } from '../../src/components/ui/TeamBadge';
 import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
 import { posterService } from '../../src/services/posterService';
 import { Poster } from '../../src/types/poster';
+import { PosterLayerItem } from '../../src/types/mural';
+import { supabase } from '../../src/lib/supabase';
 import { Colors, Spacing, Typography, Radius } from '../../src/theme';
 import {
   SCAN_POSTER_IMAGE,
   BACKGROUND2_IMAGE,
 } from '../../src/constants/badges';
+
+type PosterLiveStats = {
+  layerCount: number;
+  contributorsCount: number;
+  myContributionCount: number;
+  lastActivityAt: string | null;
+  heat: number;
+  isHot: boolean;
+};
+
+const LIVE_BATTLE_WINDOW_MS = 1000 * 60 * 60 * 6; // 6h
+const HOT_THRESHOLD = 75;
+
+function timeDiffMs(dateString?: string | null) {
+  if (!dateString) return Number.POSITIVE_INFINITY;
+  return Date.now() - new Date(dateString).getTime();
+}
+
+function deriveHeat(
+  layerCount: number,
+  contributorsCount: number,
+  lastActivityAt: string | null,
+) {
+  const activityBonus = (() => {
+    if (!lastActivityAt) return 0;
+    const diff = Date.now() - new Date(lastActivityAt).getTime();
+
+    if (diff <= 60 * 60 * 1000) return 28;
+    if (diff <= 3 * 60 * 60 * 1000) return 22;
+    if (diff <= 12 * 60 * 60 * 1000) return 14;
+    if (diff <= 24 * 60 * 60 * 1000) return 8;
+    return 0;
+  })();
+
+  return Math.min(100, layerCount * 2 + contributorsCount * 7 + activityBonus + 18);
+}
+
+function buildLiveStats(
+  poster: Poster,
+  layers: PosterLayerItem[],
+  currentUserId?: string | null,
+): PosterLiveStats {
+  const uniqueAuthors = new Set(
+    layers.map((l) => l.authorId).filter(Boolean)
+  );
+
+  const myContributionCount = currentUserId
+    ? layers.filter((l) => l.authorId === currentUserId).length
+    : 0;
+
+  const latestLayerAt =
+    layers.length > 0
+      ? [...layers].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )[0]?.createdAt ?? null
+      : null;
+
+  const lastActivityAt = latestLayerAt ?? poster.territory?.lastActivityAt ?? null;
+  const layerCount = layers.length;
+  const contributorsCount = uniqueAuthors.size;
+  const heat = deriveHeat(layerCount, contributorsCount, lastActivityAt);
+
+  return {
+    layerCount,
+    contributorsCount,
+    myContributionCount,
+    lastActivityAt,
+    heat,
+    isHot: heat >= HOT_THRESHOLD,
+  };
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -30,10 +104,11 @@ export default function HomeScreen() {
 
   const [allPosters, setAllPosters] = useState<Poster[]>([]);
   const [postersLoading, setPostersLoading] = useState(true);
+  const [layersMap, setLayersMap] = useState<Record<string, PosterLayerItem[]>>({});
+  const [liveLoading, setLiveLoading] = useState(true);
 
-  const OPEN_YOUR_WALL_IMAGE = require('../_layout/OpenYourWall.png'); 
+  const OPEN_YOUR_WALL_IMAGE = require('../_layout/OpenYourWall.png');
 
-  // Încarcă toate posterele disponibile din Supabase
   const fetchAll = useCallback(async () => {
     setPostersLoading(true);
     try {
@@ -50,24 +125,186 @@ export default function HomeScreen() {
     fetchAll();
   }, [fetchAll]);
 
-  // Încarcă vault-ul utilizatorului curent
   useEffect(() => {
     if (user?.id) loadVault(user.id);
-  }, [user?.id]);
+  }, [user?.id, loadVault]);
+
+  const relevantPosterIds = useMemo(() => {
+    const ids = new Set<string>();
+    allPosters.forEach((p) => ids.add(p.id));
+    vaultPosters.forEach((p) => ids.add(p.id));
+    return Array.from(ids);
+  }, [allPosters, vaultPosters]);
+
+  const syncPosterLayers = useCallback(async (posterId: string) => {
+    try {
+      const freshLayers = await posterService.fetchLayers(posterId).catch(() => [] as PosterLayerItem[]);
+      setLayersMap((prev) => ({
+        ...prev,
+        [posterId]: freshLayers,
+      }));
+    } catch {
+      // silent fail
+    }
+  }, []);
+
+  useEffect(() => {
+    if (relevantPosterIds.length === 0) {
+      setLayersMap({});
+      setLiveLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLiveLoading(true);
+
+    (async () => {
+      try {
+        const results = await Promise.all(
+          relevantPosterIds.map((posterId) =>
+            posterService.fetchLayers(posterId).catch(() => [] as PosterLayerItem[])
+          )
+        );
+
+        if (cancelled) return;
+
+        const nextMap: Record<string, PosterLayerItem[]> = {};
+        relevantPosterIds.forEach((posterId, index) => {
+          nextMap[posterId] = results[index] ?? [];
+        });
+
+        setLayersMap(nextMap);
+      } finally {
+        if (!cancelled) setLiveLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [relevantPosterIds]);
+
+  useEffect(() => {
+    if (relevantPosterIds.length === 0) return;
+
+    const handleRealtime = async (payload: any) => {
+      const posterId =
+        (payload?.new?.poster_id as string | undefined) ??
+        (payload?.old?.poster_id as string | undefined);
+
+      if (!posterId || !relevantPosterIds.includes(posterId)) return;
+      await syncPosterLayers(posterId);
+    };
+
+    const channel = supabase
+      .channel('home_live_layers')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'mural_layers' },
+        handleRealtime,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mural_layers' },
+        handleRealtime,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'mural_layers' },
+        handleRealtime,
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [relevantPosterIds, syncPosterLayers]);
+
+  const posterStatsMap = useMemo(() => {
+    const map: Record<string, PosterLiveStats> = {};
+
+    allPosters.forEach((poster) => {
+      map[poster.id] = buildLiveStats(
+        poster,
+        layersMap[poster.id] ?? [],
+        user?.id
+      );
+    });
+
+    return map;
+  }, [allPosters, layersMap, user?.id]);
+
+  const liveBattles = useMemo(() => {
+    return allPosters.filter((poster) => {
+      const stats = posterStatsMap[poster.id];
+      if (!stats?.lastActivityAt) return false;
+      return timeDiffMs(stats.lastActivityAt) <= LIVE_BATTLE_WINDOW_MS;
+    });
+  }, [allPosters, posterStatsMap]);
+
+  const hotWalls = useMemo(() => {
+    return allPosters.filter((poster) => posterStatsMap[poster.id]?.isHot);
+  }, [allPosters, posterStatsMap]);
+
+  const featuredPoster = useMemo(() => {
+    if (vaultPosters.length > 0) {
+      return [...vaultPosters].sort((a, b) => {
+        const aTime = posterStatsMap[a.id]?.lastActivityAt
+          ? new Date(posterStatsMap[a.id].lastActivityAt!).getTime()
+          : 0;
+        const bTime = posterStatsMap[b.id]?.lastActivityAt
+          ? new Date(posterStatsMap[b.id].lastActivityAt!).getTime()
+          : 0;
+        return bTime - aTime;
+      })[0] ?? null;
+    }
+
+    return [...allPosters].sort((a, b) => {
+      const aHeat = posterStatsMap[a.id]?.heat ?? 0;
+      const bHeat = posterStatsMap[b.id]?.heat ?? 0;
+      return bHeat - aHeat;
+    })[0] ?? null;
+  }, [vaultPosters, allPosters, posterStatsMap]);
+
+  const activeBattlePosters = useMemo(() => {
+    return [...allPosters]
+      .sort((a, b) => {
+        const aHeat = posterStatsMap[a.id]?.heat ?? 0;
+        const bHeat = posterStatsMap[b.id]?.heat ?? 0;
+        return bHeat - aHeat;
+      })
+      .slice(0, 6);
+  }, [allPosters, posterStatsMap]);
+
+  const recentCapturedPosters = useMemo(() => {
+    return [...vaultPosters]
+      .sort((a, b) => {
+        const aTime = posterStatsMap[a.id]?.lastActivityAt
+          ? new Date(posterStatsMap[a.id].lastActivityAt!).getTime()
+          : 0;
+        const bTime = posterStatsMap[b.id]?.lastActivityAt
+          ? new Date(posterStatsMap[b.id].lastActivityAt!).getTime()
+          : 0;
+        return bTime - aTime;
+      })
+      .slice(0, 3);
+  }, [vaultPosters, posterStatsMap]);
+
+  const liveCount = liveBattles.length;
+  const wallCount = vaultPosters.length;
+  const hotCount = hotWalls.length;
 
   const handlePosterPress = (poster: Poster) => {
     router.push(`/poster/${poster.id}`);
   };
 
-  // Posterul featured = cel mai recent scanat de user, sau primul din toate
-  const featuredPoster = vaultPosters[0] ?? null;
-const liveCount = vaultPosters.length;
-const wallCount = vaultPosters.length;
-const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
-
   const featuredPosterLabel = featuredPoster?.name
     ? featuredPoster.name.toUpperCase()
     : 'UNKNOWN POSTER';
+
+  const featuredHeat = featuredPoster
+    ? posterStatsMap[featuredPoster.id]?.heat ?? 0
+    : 0;
 
   return (
     <ScreenContainer scrollable padded={false} style={styles.screen}>
@@ -82,8 +319,6 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
               Scan real posters. Join live battles. Leave a mark the city remembers.
             </Text>
           </View>
-
-          
         </View>
       </View>
 
@@ -113,8 +348,6 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
         imageStyle={styles.heroImage}
       >
         <View style={styles.heroOverlay}>
-        
-
           <Text style={styles.heroTitle}>SCAN. CREATE. TAKE OVER.</Text>
 
           <Text style={styles.heroSubtitle}>
@@ -122,22 +355,23 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
             teams compete with style, speed, and presence.
           </Text>
 
+          <TouchableOpacity
+            activeOpacity={0.88}
+            style={styles.heroActionPrimary}
+            onPress={() => router.push('/scanner')}
+          >
+            <Image
+              source={SCAN_POSTER_IMAGE}
+              style={styles.heroActionImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+
+          <View style={styles.heroActions}>
             <TouchableOpacity
               activeOpacity={0.88}
               style={styles.heroActionPrimary}
-              onPress={() => router.push('/scanner')}
-            >
-              <Image
-                source={SCAN_POSTER_IMAGE}
-                style={styles.heroActionImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-            <View style={styles.heroActions}>
-            <TouchableOpacity
-              activeOpacity={0.88}
-              style={styles.heroActionPrimary}
-              onPress={() => router.push('/scanner')}
+              onPress={() => router.push('/(main)/vault')}
             >
               <Image
                 source={OPEN_YOUR_WALL_IMAGE}
@@ -150,11 +384,8 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
               activeOpacity={0.88}
               style={styles.heroActionSecondary}
               onPress={() => router.push('/(main)/vault')}
-            >
-            </TouchableOpacity>
+            />
           </View>
-
-          
         </View>
       </ImageBackground>
 
@@ -163,7 +394,7 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
           <View style={styles.sectionHeader}>
             <View style={[styles.sectionDot, { backgroundColor: Colors.accentYellow }]} />
             <Text style={[styles.sectionTitle, { color: Colors.accentYellow }]}>
-              {wallCount > 0 ? 'LAST SCANNED' : "TONIGHT'S SPOTLIGHT"}
+              {wallCount > 0 ? 'LAST ACTIVE ON YOUR WALL' : "CITY SPOTLIGHT"}
             </Text>
           </View>
 
@@ -178,7 +409,9 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
                   {wallCount > 0 ? 'YOUR WALL' : 'TRENDING WALL'}
                 </Text>
               </View>
-              <Text style={styles.spotlightLive}>LIVE NOW</Text>
+              <Text style={styles.spotlightLive}>
+                {posterStatsMap[featuredPoster.id]?.isHot ? 'HOT NOW' : 'LIVE'}
+              </Text>
             </View>
 
             <Text style={styles.spotlightTitle} numberOfLines={1}>
@@ -193,20 +426,20 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
 
             <Text style={styles.spotlightText}>
               {wallCount > 0
-                ? 'Reopen your last battle room, continue the artwork, or defend it before another team takes over.'
-                : 'Biggest clash in the city right now. Jump in and help your crew leave the boldest mark on this wall.'}
+                ? 'Reopen the most active wall from your collection, keep painting, or defend it before another team pushes harder.'
+                : 'This is one of the strongest active walls in the city right now. Jump in and help your crew take over.'}
             </Text>
 
             <View style={styles.spotlightStats}>
               <View style={styles.spotlightStat}>
                 <Text style={styles.spotlightStatLabel}>HEAT</Text>
-                <Text style={styles.spotlightStatValue}>
-                  {Math.round((featuredPoster.territory?.heat ?? 0) * 100)}%
-                </Text>
+                <Text style={styles.spotlightStatValue}>{featuredHeat}%</Text>
               </View>
               <View style={styles.spotlightStat}>
-                <Text style={styles.spotlightStatLabel}>MODE</Text>
-                <Text style={styles.spotlightStatValue}>OPEN</Text>
+                <Text style={styles.spotlightStatLabel}>LAYERS</Text>
+                <Text style={styles.spotlightStatValue}>
+                  {posterStatsMap[featuredPoster.id]?.layerCount ?? 0}
+                </Text>
               </View>
               <View style={styles.spotlightStat}>
                 <Text style={styles.spotlightStatLabel}>YOUR SCANS</Text>
@@ -226,39 +459,39 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
         </View>
 
         <Text style={styles.sectionDescription}>
-          Jump into live posters, reinforce your crew’s presence, and watch walls
-          evolve in real time.
+          These are the most active posters right now based on real layers, contributors,
+          and recent wall activity.
         </Text>
 
-        {postersLoading ? (
-  <ActivityIndicator color={Colors.accentGreen} style={{ marginTop: Spacing[4] }} />
-) : vaultPosters.length === 0 ? (
-  <View style={styles.emptyBattles}>
-    <Text style={styles.emptyBattlesText}>You haven’t scanned any posters yet.</Text>
-    <TouchableOpacity onPress={() => router.push('/scanner')}>
-      <Text style={[styles.emptyBattlesText, { color: Colors.accentCyan, marginTop: 6 }]}>
-        Scan your first poster →
-      </Text>
-    </TouchableOpacity>
-  </View>
-) : (
-  <FlatList
-    data={vaultPosters}
-    keyExtractor={(p) => p.id}
-    renderItem={({ item }) => (
-      <PosterCard
-        poster={item}
-        onPress={handlePosterPress}
-        style={styles.card}
-      />
-    )}
-    scrollEnabled={false}
-    contentContainerStyle={styles.listContent}
-  />
-)}
+        {(postersLoading || liveLoading) && allPosters.length === 0 ? (
+          <ActivityIndicator color={Colors.accentGreen} style={{ marginTop: Spacing[4] }} />
+        ) : activeBattlePosters.length === 0 ? (
+          <View style={styles.emptyBattles}>
+            <Text style={styles.emptyBattlesText}>No active battles detected right now.</Text>
+            <TouchableOpacity onPress={() => router.push('/scanner')}>
+              <Text style={[styles.emptyBattlesText, { color: Colors.accentCyan, marginTop: 6 }]}>
+                Start one by scanning a poster →
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <FlatList
+            data={activeBattlePosters}
+            keyExtractor={(p) => p.id}
+            renderItem={({ item }) => (
+              <PosterCard
+                poster={item}
+                onPress={handlePosterPress}
+                style={styles.card}
+              />
+            )}
+            scrollEnabled={false}
+            contentContainerStyle={styles.listContent}
+          />
+        )}
       </View>
 
-      {vaultPosters.length > 0 && (
+      {recentCapturedPosters.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={[styles.sectionDot, { backgroundColor: Colors.accentCyan }]} />
@@ -268,11 +501,10 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
           </View>
 
           <Text style={styles.sectionDescription}>
-            Reopen your recent walls, continue the artwork, or defend them before
-            another team takes over.
+            Your scanned posters, ordered by live activity and recent movement.
           </Text>
 
-          {vaultPosters.slice(0, 3).map((p) => (
+          {recentCapturedPosters.map((p) => (
             <PosterCard
               key={p.id}
               poster={p}
@@ -296,12 +528,12 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
             <Text style={styles.crewName}>
               {user?.username?.toUpperCase() ?? 'ARTIST'}
             </Text>
-            {user && <TeamBadge teamId={user.teamId} />}
+            {user?.teamId && <TeamBadge teamId={user.teamId} />}
           </View>
 
           <Text style={styles.crewText}>
-            Every poster you scan becomes part of your creative footprint in the city.
-            Build presence, collect walls, and turn every battle into identity.
+            Your presence grows with every scan and every layer your team leaves behind.
+            The home screen now reflects live wall pressure across the city.
           </Text>
 
           <View style={styles.crewStatsRow}>
@@ -367,10 +599,6 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     maxWidth: '92%',
   },
-  headerBadgeWrap: {
-    alignSelf: 'flex-start',
-    marginTop: Spacing[1],
-  },
 
   statsRow: {
     flexDirection: 'row',
@@ -388,7 +616,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     justifyContent: 'space-between',
-    alignItems: "center"
+    alignItems: 'center',
   },
   statDot: {
     width: 8,
@@ -429,20 +657,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing[4],
     justifyContent: 'space-between',
   },
-  heroBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.accentYellow,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  heroBadgeText: {
-    color: '#000',
-    fontSize: 10,
-    fontWeight: Typography.fontWeights.black,
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
-  },
   heroTitle: {
     color: Colors.white,
     fontSize: Typography.fontSizes['3xl'] + 4,
@@ -473,42 +687,6 @@ const styles = StyleSheet.create({
   heroActionImage: {
     width: '100%',
     height: 160,
-  },
-  wallEntryCard: {
-    backgroundColor: 'rgba(11,11,15,0.92)',
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(18,214,255,0.28)',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  wallEntryEyebrow: {
-    color: Colors.accentCyan,
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.widest,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  wallEntryTitle: {
-    color: Colors.white,
-    fontSize: Typography.fontSizes.xl,
-    fontWeight: Typography.fontWeights.black,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  wallEntryText: {
-    color: Colors.textMuted,
-    fontSize: Typography.fontSizes.sm,
-    lineHeight: 20,
-  },
-  heroFooterText: {
-    color: Colors.accentCyan,
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.widest,
-    textTransform: 'uppercase',
-    marginTop: Spacing[2],
   },
 
   section: {

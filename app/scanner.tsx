@@ -5,11 +5,11 @@
  * Flow:
  *   idle → user presses shutter
  *   capturing → takePictureAsync
- *   processing → matchPosterImage (backend / demo fallback)
+ *   processing → matchPosterImage
  *   success    → router.replace('/poster/<id>')
  *   candidates → ConfidenceDialog (pick manually)
  *   failed     → shake + "Not recognized", reset after 2s
- *   error      → "Connection error", reset after 3s
+ *   error      → "Connection error", reset after 5s
  */
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
@@ -20,16 +20,20 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Platform,
-  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ScanFrame }        from '../src/components/scanner/ScanFrame';
+import { ScanFrame } from '../src/components/scanner/ScanFrame';
 import { ConfidenceDialog } from '../src/components/scanner/ConfidenceDialog';
-import { matchPosterImage, saveScanRecord, confirmScanRecord, ERR_BACKEND_OFFLINE } from '../src/services/scanService';
-import { useHaptics }       from '../src/hooks/useHaptics';
+import {
+  matchPosterImage,
+  saveScanRecord,
+  confirmScanRecord,
+  ERR_BACKEND_OFFLINE,
+} from '../src/services/scanService';
+import { useHaptics } from '../src/hooks/useHaptics';
 import {
   ScanPhase,
   ScanCandidate,
@@ -37,55 +41,45 @@ import {
   CONFIDENCE_CANDIDATES,
 } from '../src/types/scan';
 import { Colors, Spacing, Radius, Typography } from '../src/theme';
-import { MOCK_POSTERS } from '../src/mock/posters';
-
-// ─── Auth (same pattern as the rest of the app) ───────────────────────────────
-
-import { useAuthStore }  from '../src/stores/authStore';
+import { useAuthStore } from '../src/stores/authStore';
 import { useVaultStore } from '../src/stores/vaultStore';
 import { posterService } from '../src/services/posterService';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const AUTO_RESET_FAILED_MS = 2200;
-const AUTO_RESET_ERROR_MS  = 5000;   // mai mult timp pt a vedea/apăsa retry
-
-// ─── Main screen ─────────────────────────────────────────────────────────────
+const AUTO_RESET_ERROR_MS = 5000;
 
 export default function ScannerScreen() {
-  const router  = useRouter();
-  const insets  = useSafeAreaInsets();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const haptics = useHaptics();
-  const user            = useAuthStore((s) => s.user);
+
+  const user = useAuthStore((s) => s.user);
   const addScannedPoster = useVaultStore((s) => s.addScannedPoster);
 
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
-  // ── State machine ─────────────────────────────────────────────────────────
-  const [phase,          setPhase]          = useState<ScanPhase>('idle');
-  const [candidates,     setCandidates]     = useState<ScanCandidate[]>([]);
-  const [showDialog,     setShowDialog]     = useState(false);
-  const [scanId,         setScanId]         = useState<string | null>(null);
-  const [errorMsg,       setErrorMsg]       = useState<string>('');
+  const [phase, setPhase] = useState<ScanPhase>('idle');
+  const [candidates, setCandidates] = useState<ScanCandidate[]>([]);
+  const [showDialog, setShowDialog] = useState(false);
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
   const [backendOffline, setBackendOffline] = useState(false);
 
-  // Prevent double-captures while a scan is in progress
   const isCapturing = useRef(false);
 
-  // ── Auto-reset after failed / error ───────────────────────────────────────
   useEffect(() => {
     if (phase === 'failed') {
       const t = setTimeout(() => setPhase('idle'), AUTO_RESET_FAILED_MS);
       return () => clearTimeout(t);
     }
+
     if (phase === 'error') {
       const t = setTimeout(() => setPhase('idle'), AUTO_RESET_ERROR_MS);
       return () => clearTimeout(t);
     }
   }, [phase]);
 
-  // ── Capture handler ───────────────────────────────────────────────────────
   const handleCapture = useCallback(async () => {
     if (isCapturing.current || phase !== 'idle') return;
     if (!cameraRef.current) return;
@@ -95,61 +89,54 @@ export default function ScannerScreen() {
     setPhase('capturing');
 
     try {
-      // 1. Take picture — quality 0.55 = ~3x smaller file vs 0.9, suficient pt ORB
       const pic = await cameraRef.current.takePictureAsync({
-        quality:        0.55,
-        skipProcessing: true,   // mai rapid, nu rotim/procesăm înainte de trimis
+        quality: 0.55,
+        skipProcessing: true,
       });
 
       setPhase('processing');
 
-      // 2. Match image against backend (or demo fallback)
       const result = await matchPosterImage(pic.uri, user?.id);
 
-      // 3. Optionally save scan record
       let newScanId: string | null = null;
       if (user?.id) {
         newScanId = await saveScanRecord({
-          userId:     user.id,
-          posterId:   result.posterId ?? null,
+          userId: user.id,
+          posterId: result.posterId ?? null,
           confidence: result.confidence,
-          matched:    result.matched,
-          corners:    result.corners,
+          matched: result.matched,
+          corners: result.corners,
         });
         setScanId(newScanId);
       }
 
-      // 4. Route by confidence
       if (result.confidence >= CONFIDENCE_AUTO_OPEN && result.posterId) {
-        // ── Auto-open ─────────────────────────────────────────
         setPhase('success');
         await haptics.posterRecognized();
 
-        // Adaugă posterul în vault ÎNAINTE de navigare
         const foundPoster = await posterService.fetchPoster(result.posterId);
-        if (foundPoster) await addScannedPoster(foundPoster);
+        if (foundPoster) {
+          await addScannedPoster(foundPoster);
+        }
 
-        // Small pause so user sees the success state
         await new Promise((r) => setTimeout(r, 600));
         router.replace(`/poster/${result.posterId}`);
+        return;
+      }
 
-      } else if (result.confidence >= CONFIDENCE_CANDIDATES && result.candidates?.length) {
-        // ── Show candidate dialog ──────────────────────────────
+      if (result.confidence >= CONFIDENCE_CANDIDATES && result.candidates?.length) {
         setPhase('candidates');
         setCandidates(result.candidates);
         await haptics.candidatesFound();
         setShowDialog(true);
-
-      } else {
-        // ── Not recognized ─────────────────────────────────────
-        setPhase('failed');
-        await haptics.posterNotFound();
+        return;
       }
 
+      setPhase('failed');
+      await haptics.posterNotFound();
     } catch (err: any) {
       console.warn('[scanner] capture error:', err?.message ?? err);
 
-      // Backend offline → stare specială cu buton Demo Mode
       if (err?.message === ERR_BACKEND_OFFLINE) {
         setBackendOffline(true);
         setPhase('error');
@@ -159,30 +146,32 @@ export default function ScannerScreen() {
         setErrorMsg(err?.message ?? 'Connection error');
         setPhase('error');
       }
+
       await haptics.error();
     } finally {
       isCapturing.current = false;
     }
-  }, [phase, user, haptics, router]);
+  }, [phase, user, haptics, router, addScannedPoster]);
 
-  // ── Candidate selected from dialog ────────────────────────────────────────
-  const handleCandidateSelect = useCallback(async (candidate: ScanCandidate) => {
-    setShowDialog(false);
-    haptics.selection();
+  const handleCandidateSelect = useCallback(
+    async (candidate: ScanCandidate) => {
+      setShowDialog(false);
+      haptics.selection();
 
-    // Confirm in DB if we have a scan record
-    if (scanId) {
-      await confirmScanRecord(scanId, candidate.posterId);
-    }
+      if (scanId) {
+        await confirmScanRecord(scanId, candidate.posterId);
+      }
 
-    // Adaugă posterul în vault
-    const foundPoster = await posterService.fetchPoster(candidate.posterId);
-    if (foundPoster) await addScannedPoster(foundPoster);
+      const foundPoster = await posterService.fetchPoster(candidate.posterId);
+      if (foundPoster) {
+        await addScannedPoster(foundPoster);
+      }
 
-    router.replace(`/poster/${candidate.posterId}`);
-  }, [scanId, haptics, router, addScannedPoster]);
+      router.replace(`/poster/${candidate.posterId}`);
+    },
+    [scanId, haptics, router, addScannedPoster],
+  );
 
-  // ── Dialog dismissed ──────────────────────────────────────────────────────
   const handleDialogDismiss = useCallback(() => {
     setShowDialog(false);
     setPhase('idle');
@@ -190,13 +179,6 @@ export default function ScannerScreen() {
     setScanId(null);
   }, []);
 
-  // ── Demo shortcut ─────────────────────────────────────────────────────────
-  const handleDemo = useCallback((posterId: string) => {
-    haptics.tap();
-    router.replace(`/poster/${posterId}`);
-  }, [haptics, router]);
-
-  // ── Permission screens ────────────────────────────────────────────────────
   if (!permission) {
     return <LoadingScreen onBack={() => router.back()} insets={insets} />;
   }
@@ -211,23 +193,19 @@ export default function ScannerScreen() {
     );
   }
 
-  // ── Main UI ───────────────────────────────────────────────────────────────
   const isProcessing = phase === 'processing' || phase === 'capturing';
   const shutterDisabled = phase !== 'idle';
 
   return (
     <View style={styles.root}>
-      {/* ── Full-screen camera ─────────────────────────────────── */}
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing="back"
       />
 
-      {/* ── Animated overlay ──────────────────────────────────── */}
       <ScanFrame phase={phase} />
 
-      {/* ── Top bar ───────────────────────────────────────────── */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={12}>
           <Text style={styles.backText}>✕</Text>
@@ -236,51 +214,41 @@ export default function ScannerScreen() {
         <View style={styles.backBtn} />
       </View>
 
-      {/* ── Error / Backend offline strip ──────────────────────── */}
       {phase === 'error' && (
         <View style={styles.errorStrip}>
           {backendOffline ? (
-            /* Backend nu răspunde */
             <>
-              <Text style={styles.errorStripTitle}>⚠️  Backend offline</Text>
+              <Text style={styles.errorStripTitle}>⚠️ Backend offline</Text>
               <Text style={styles.errorStripText}>
-                Nu s-a putut conecta la{'\n'}
+                Could not connect to{'\n'}
                 {process.env.EXPO_PUBLIC_SCAN_API_URL ?? 'server'}
               </Text>
               <Text style={styles.errorStripHint}>
-                Pornește serverul:  cd backend &amp;&amp; python main.py
+                Start the server: cd backend &amp;&amp; python main.py
               </Text>
-              <View style={styles.errorBtnRow}>
-                <TouchableOpacity
-                  style={styles.retryBtn}
-                  onPress={() => { setPhase('idle'); setBackendOffline(false); }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.retryBtnText}>RETRY</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.demoModeBtn}
-                  onPress={() => {
-                    setPhase('idle');
-                    setBackendOffline(false);
-                    // Folosim primul poster mock ca demo rapid
-                    if (MOCK_POSTERS[0]) handleDemo(MOCK_POSTERS[0].id);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.demoModeBtnText}>DEMO MODE</Text>
-                </TouchableOpacity>
-              </View>
+
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={() => {
+                  setPhase('idle');
+                  setBackendOffline(false);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.retryBtnText}>RETRY</Text>
+              </TouchableOpacity>
             </>
           ) : (
-            /* Altă eroare (timeout etc.) */
             <>
               <Text style={styles.errorStripText}>
                 {errorMsg || 'Connection error — try again'}
               </Text>
               <TouchableOpacity
                 style={styles.retryBtn}
-                onPress={() => { setPhase('idle'); setErrorMsg(''); }}
+                onPress={() => {
+                  setPhase('idle');
+                  setErrorMsg('');
+                }}
                 activeOpacity={0.8}
               >
                 <Text style={styles.retryBtnText}>RETRY</Text>
@@ -290,10 +258,7 @@ export default function ScannerScreen() {
         </View>
       )}
 
-      {/* ── Bottom controls ───────────────────────────────────── */}
       <View style={[styles.bottomArea, { paddingBottom: insets.bottom + 16 }]}>
-
-        {/* Shutter button */}
         <TouchableOpacity
           style={[styles.shutter, shutterDisabled && styles.shutterDisabled]}
           onPress={handleCapture}
@@ -306,28 +271,8 @@ export default function ScannerScreen() {
             <View style={styles.shutterInner} />
           )}
         </TouchableOpacity>
-
-        {/* Demo chips */}
-        <View style={styles.demoWrap}>
-          <Text style={styles.demoLabel}>DEMO POSTERS</Text>
-          <View style={styles.demoRow}>
-            {MOCK_POSTERS.map((p) => (
-              <TouchableOpacity
-                key={p.id}
-                onPress={() => handleDemo(p.id)}
-                style={styles.demoChip}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.demoChipText}>
-                  {p.name.split('—')[0].trim()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
       </View>
 
-      {/* ── Candidate dialog ──────────────────────────────────── */}
       <ConfidenceDialog
         visible={showDialog}
         candidates={candidates}
@@ -338,16 +283,14 @@ export default function ScannerScreen() {
   );
 }
 
-// ─── Permission screen ────────────────────────────────────────────────────────
-
 function PermissionScreen({
   onBack,
   onRequest,
   insets,
 }: {
-  onBack:     () => void;
-  onRequest:  () => void;
-  insets:     { top: number; bottom: number };
+  onBack: () => void;
+  onRequest: () => void;
+  insets: { top: number; bottom: number };
 }) {
   return (
     <View style={[styles.permScreen, { paddingTop: insets.top + 16 }]}>
@@ -372,8 +315,6 @@ function PermissionScreen({
   );
 }
 
-// ─── Loading screen ───────────────────────────────────────────────────────────
-
 function LoadingScreen({
   onBack,
   insets,
@@ -386,6 +327,7 @@ function LoadingScreen({
       <TouchableOpacity onPress={onBack} style={styles.backBtn}>
         <Text style={styles.backText}>✕</Text>
       </TouchableOpacity>
+
       <View style={styles.permContent}>
         <ActivityIndicator color={Colors.accentYellow} size="large" />
         <Text style={[styles.permDesc, { marginTop: Spacing[4] }]}>
@@ -396,229 +338,172 @@ function LoadingScreen({
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const { width: SCREEN_W } = Dimensions.get('window');
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#000',
   },
 
-  // ── Top bar ─────────────────────────────────────────────────
   topBar: {
-    position:       'absolute',
-    top:            0,
-    left:           0,
-    right:          0,
-    flexDirection:  'row',
-    alignItems:     'center',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: Spacing[5],
-    paddingBottom:  Spacing[3],
+    paddingBottom: Spacing[3],
   },
   backBtn: {
-    width:          36,
-    height:         36,
-    alignItems:     'center',
+    width: 36,
+    height: 36,
+    alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius:   18,
+    borderRadius: 18,
   },
   backText: {
-    color:    Colors.white,
+    color: Colors.white,
     fontSize: Typography.fontSizes.base,
     fontWeight: Typography.fontWeights.bold,
   },
   screenTitle: {
-    fontSize:      Typography.fontSizes.sm,
-    fontWeight:    Typography.fontWeights.black,
-    color:         Colors.white,
+    fontSize: Typography.fontSizes.sm,
+    fontWeight: Typography.fontWeights.black,
+    color: Colors.white,
     letterSpacing: Typography.letterSpacing.widest,
-    textShadowColor:  'rgba(0,0,0,0.9)',
+    textShadowColor: 'rgba(0,0,0,0.9)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
 
-  // ── Error strip ─────────────────────────────────────────────
   errorStrip: {
-    position:        'absolute',
-    top:             '30%',
-    left:            Spacing[5],
-    right:           Spacing[5],
+    position: 'absolute',
+    top: '30%',
+    left: Spacing[5],
+    right: Spacing[5],
     backgroundColor: 'rgba(20,0,0,0.93)',
-    borderRadius:    Radius.md ?? 12,
-    borderWidth:     1,
-    borderColor:     Colors.error + '88',
-    paddingVertical:   Spacing[4],
+    borderRadius: Radius.md ?? 12,
+    borderWidth: 1,
+    borderColor: Colors.error + '88',
+    paddingVertical: Spacing[4],
     paddingHorizontal: Spacing[5],
-    alignItems:      'center',
-    gap:             Spacing[2],
+    alignItems: 'center',
+    gap: Spacing[2],
   },
   errorStripTitle: {
-    color:         Colors.white,
-    fontSize:      Typography.fontSizes.base,
-    fontWeight:    Typography.fontWeights.black,
-    textAlign:     'center',
+    color: Colors.white,
+    fontSize: Typography.fontSizes.base,
+    fontWeight: Typography.fontWeights.black,
+    textAlign: 'center',
     letterSpacing: 0.5,
   },
   errorStripText: {
-    color:      'rgba(255,255,255,0.8)',
-    fontSize:   Typography.fontSizes.sm,
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: Typography.fontSizes.sm,
     fontWeight: Typography.fontWeights.semibold,
-    textAlign:  'center',
+    textAlign: 'center',
     lineHeight: 20,
   },
   errorStripHint: {
-    color:      'rgba(255,255,255,0.45)',
-    fontSize:   10,
-    textAlign:  'center',
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    textAlign: 'center',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    marginTop:  Spacing[1],
-  },
-  errorBtnRow: {
-    flexDirection: 'row',
-    gap:           Spacing[3],
-    marginTop:     Spacing[2],
+    marginTop: Spacing[1],
   },
   retryBtn: {
     backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth:     1,
-    borderColor:     'rgba(255,255,255,0.4)',
-    borderRadius:    Radius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+    borderRadius: Radius.full,
     paddingHorizontal: Spacing[5],
-    paddingVertical:   Spacing[2],
+    paddingVertical: Spacing[2],
+    marginTop: Spacing[2],
   },
   retryBtnText: {
-    color:         Colors.white,
-    fontSize:      Typography.fontSizes.xs,
-    fontWeight:    Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.widest,
-  },
-  demoModeBtn: {
-    backgroundColor: Colors.accentCyan,
-    borderRadius:    Radius.full,
-    paddingHorizontal: Spacing[5],
-    paddingVertical:   Spacing[2],
-  },
-  demoModeBtnText: {
-    color:         '#000',
-    fontSize:      Typography.fontSizes.xs,
-    fontWeight:    Typography.fontWeights.black,
+    color: Colors.white,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.widest,
   },
 
-  // ── Bottom area ─────────────────────────────────────────────
   bottomArea: {
-    position:  'absolute',
-    bottom:    0,
-    left:      0,
-    right:     0,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    gap:        Spacing[5],
+    gap: Spacing[5],
     paddingTop: Spacing[4],
   },
-
-  // Shutter button
   shutter: {
-    width:           72,
-    height:          72,
-    borderRadius:    36,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: Colors.white,
-    alignItems:      'center',
-    justifyContent:  'center',
-    borderWidth:     3,
-    borderColor:     'rgba(255,255,255,0.4)',
-    shadowColor:     Colors.white,
-    shadowOpacity:   0.4,
-    shadowRadius:    12,
-    shadowOffset:    { width: 0, height: 0 },
-    elevation:       8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.4)',
+    shadowColor: Colors.white,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
   },
   shutterDisabled: {
     backgroundColor: Colors.textMuted,
-    shadowOpacity:   0,
+    shadowOpacity: 0,
   },
   shutterInner: {
-    width:           52,
-    height:          52,
-    borderRadius:    26,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: Colors.white,
   },
 
-  // Demo chips
-  demoWrap: {
-    alignItems: 'center',
-    gap:        Spacing[2],
-    paddingHorizontal: Spacing[4],
-  },
-  demoLabel: {
-    color:         'rgba(255,255,255,0.45)',
-    fontSize:      Typography.fontSizes.xs,
-    letterSpacing: Typography.letterSpacing.widest,
-    textTransform: 'uppercase',
-  },
-  demoRow: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
-    justifyContent: 'center',
-    gap:            Spacing[2],
-  },
-  demoChip: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth:     1,
-    borderColor:     'rgba(255,255,255,0.2)',
-    borderRadius:    Radius.full,
-    paddingHorizontal: Spacing[3],
-    paddingVertical:   Spacing[1],
-  },
-  demoChipText: {
-    color:    'rgba(255,255,255,0.7)',
-    fontSize: Typography.fontSizes.xs,
-  },
-
-  // ── Permission / Loading screens ─────────────────────────────
   permScreen: {
-    flex:            1,
+    flex: 1,
     backgroundColor: Colors.bg,
     paddingHorizontal: Spacing[5],
   },
   permContent: {
-    flex:           1,
-    alignItems:     'center',
+    flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap:            Spacing[4],
-    paddingBottom:  Spacing[12],
+    gap: Spacing[4],
+    paddingBottom: Spacing[12],
   },
   permIcon: {
     fontSize: 56,
   },
   permTitle: {
-    fontSize:   Typography.fontSizes['2xl'],
+    fontSize: Typography.fontSizes['2xl'],
     fontWeight: Typography.fontWeights.black,
-    color:      Colors.textPrimary,
+    color: Colors.textPrimary,
     letterSpacing: Typography.letterSpacing.wide,
-    textAlign:  'center',
+    textAlign: 'center',
     lineHeight: Typography.fontSizes['2xl'] * 1.3,
   },
   permDesc: {
-    fontSize:   Typography.fontSizes.base,
-    color:      Colors.textSecondary,
-    textAlign:  'center',
+    fontSize: Typography.fontSizes.base,
+    color: Colors.textSecondary,
+    textAlign: 'center',
     lineHeight: Typography.fontSizes.base * 1.6,
-    maxWidth:   280,
+    maxWidth: 280,
   },
   permBtn: {
     backgroundColor: Colors.accentPurple,
     paddingHorizontal: Spacing[8],
-    paddingVertical:   Spacing[3],
-    borderRadius:      Radius.full,
-    marginTop:         Spacing[2],
+    paddingVertical: Spacing[3],
+    borderRadius: Radius.full,
+    marginTop: Spacing[2],
   },
   permBtnText: {
-    color:      Colors.white,
-    fontSize:   Typography.fontSizes.base,
+    color: Colors.white,
+    fontSize: Typography.fontSizes.base,
     fontWeight: Typography.fontWeights.semibold,
     letterSpacing: Typography.letterSpacing.wide,
   },
@@ -626,7 +511,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing[2],
   },
   permBackText: {
-    color:    Colors.textMuted,
+    color: Colors.textMuted,
     fontSize: Typography.fontSizes.sm,
   },
 });

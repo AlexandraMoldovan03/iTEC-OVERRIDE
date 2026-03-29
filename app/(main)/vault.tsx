@@ -17,7 +17,7 @@ import React, {
 import {
   Animated, Dimensions, Image, PanResponder,
   StyleSheet, Text, TouchableOpacity, View,
-  ActivityIndicator, Platform, Modal,
+  ActivityIndicator, Platform, Modal, Vibration,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -26,15 +26,20 @@ import Svg, { Defs, Pattern, Rect, Path, Circle, G, Text as SvgText } from 'reac
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useVaultStore } from '../../src/stores/vaultStore';
-import { useAuthStore }  from '../../src/stores/authStore';
-import { supabase }      from '../../src/lib/supabase';
-import { Poster }        from '../../src/types/poster';
+import { useAuthStore } from '../../src/stores/authStore';
+import { supabase } from '../../src/lib/supabase';
+import { Poster } from '../../src/types/poster';
 import { Colors, Spacing, Typography } from '../../src/theme';
-import { TEAM_COLORS }   from '../../src/theme/colors';
+import { TEAM_COLORS } from '../../src/theme/colors';
 import { PosterLayerItem, BrushStrokeItem, StickerItem, TeamStampItem } from '../../src/types/mural';
-import { TeamId }        from '../../src/types/team';
+import { TeamId } from '../../src/types/team';
 import { posterService } from '../../src/services/posterService';
 import { ARPreviewModal } from '../../src/components/poster/ARPreviewModal';
+import { LeaderAlert } from '../../src/components/poster/LeaderAlert';
+import { computePlayerScores } from '../../src/utils/scoring';
+
+const CAT_ALERT_1 = require('../_layout/cat1.png');
+const CAT_ALERT_2 = require('../_layout/cat2.png');
 
 // ─── Canvas constants ─────────────────────────────────────────────────────────
 
@@ -44,16 +49,16 @@ const CANVAS_W = 3200;
 const CANVAS_H = 3200;
 const POSTER_W = 138;
 const POSTER_H = 192;
-const COL_GAP  = 192;
-const ROW_GAP  = 250;
-const COLS     = 4;
+const COL_GAP = 192;
+const ROW_GAP = 250;
+const COLS = 4;
 
 const INIT_X = SCREEN_W / 2 - CANVAS_W / 2;
 const INIT_Y = SCREEN_H / 2 - CANVAS_H / 2;
-const MIN_X  = SCREEN_W - CANVAS_W;
-const MAX_X  = 0;
-const MIN_Y  = SCREEN_H - CANVAS_H;
-const MAX_Y  = 0;
+const MIN_X = SCREEN_W - CANVAS_W;
+const MAX_X = 0;
+const MIN_Y = SCREEN_H - CANVAS_H;
+const MAX_Y = 0;
 
 const LONG_PRESS_MS = 500;
 
@@ -69,28 +74,34 @@ async function loadStoredPos(uid: string): Promise<Record<string, { x: number; y
   try {
     const raw = await AsyncStorage.getItem(POS_KEY(uid));
     return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 
 async function saveStoredPos(uid: string, pos: Record<string, { x: number; y: number }>) {
-  try { await AsyncStorage.setItem(POS_KEY(uid), JSON.stringify(pos)); } catch {}
+  try {
+    await AsyncStorage.setItem(POS_KEY(uid), JSON.stringify(pos));
+  } catch {}
 }
 
 // ─── Initial brick layout ─────────────────────────────────────────────────────
 
 function defaultPositions(posters: Poster[]): Record<string, { x: number; y: number }> {
-  const rows   = Math.ceil(posters.length / COLS);
+  const rows = Math.ceil(posters.length / COLS);
   const totalW = COLS * COL_GAP - (COL_GAP - POSTER_W);
-  const totalH = rows  * ROW_GAP - (ROW_GAP - POSTER_H);
+  const totalH = rows * ROW_GAP - (ROW_GAP - POSTER_H);
   const startX = CANVAS_W / 2 - totalW / 2;
   const startY = CANVAS_H / 2 - totalH / 2;
   const out: Record<string, { x: number; y: number }> = {};
+
   posters.forEach((p, i) => {
-    const col   = i % COLS;
-    const row   = Math.floor(i / COLS);
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
     const shift = (row % 2) * (COL_GAP / 2);
-    out[p.id]   = { x: startX + col * COL_GAP + shift, y: startY + row * ROW_GAP };
+    out[p.id] = { x: startX + col * COL_GAP + shift, y: startY + row * ROW_GAP };
   });
+
   return out;
 }
 
@@ -101,11 +112,11 @@ const WallPattern = React.memo(function WallPattern() {
     <Svg width={CANVAS_W} height={CANVAS_H} style={StyleSheet.absoluteFillObject} pointerEvents="none">
       <Defs>
         <Pattern id="bricks" x="0" y="0" width="200" height="64" patternUnits="userSpaceOnUse">
-          <Rect x="1"   y="1"  width="97"  height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-          <Rect x="101" y="1"  width="97"  height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-          <Rect x="-49" y="33" width="97"  height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-          <Rect x="51"  y="33" width="97"  height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-          <Rect x="151" y="33" width="97"  height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+          <Rect x="1" y="1" width="97" height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+          <Rect x="101" y="1" width="97" height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+          <Rect x="-49" y="33" width="97" height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+          <Rect x="51" y="33" width="97" height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+          <Rect x="151" y="33" width="97" height="30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
         </Pattern>
       </Defs>
       <Rect width={CANVAS_W} height={CANVAS_H} fill="#09090C" />
@@ -116,10 +127,9 @@ const WallPattern = React.memo(function WallPattern() {
 
 // ─── Tile mural overlay ───────────────────────────────────────────────────────
 
-const TILE_IMG_H = POSTER_H - 34; // image area height (below name bar)
-// Reference canvas width assumed when strokeWidth was recorded (≈ full-screen canvas)
+const TILE_IMG_H = POSTER_H - 34;
 const CANVAS_REF_W = 350;
-const STROKE_SCALE = POSTER_W / CANVAS_REF_W; // ~0.39 — shrinks strokes to tile
+const STROKE_SCALE = POSTER_W / CANVAS_REF_W;
 
 interface OverlayProps {
   layers: PosterLayerItem[];
@@ -150,18 +160,20 @@ const TileMuralOverlay = React.memo(function TileMuralOverlay({ layers }: Overla
       pointerEvents="none"
     >
       {layers.map((item) => {
-        const d         = item.data;
+        const d = item.data;
         const teamColor = TEAM_COLORS[item.teamId as TeamId];
-        const glowCol   = teamColor?.glow ?? '#ffffff';
-        const primCol   = teamColor?.primary ?? '#888888';
+        const glowCol = teamColor?.glow ?? '#ffffff';
+        const primCol = teamColor?.primary ?? '#888888';
 
         if (d.type === 'brush' || d.type === 'spray' || d.type === 'glow') {
           const stroke = d as BrushStrokeItem;
-          const pathD  = toPath(stroke.points);
+          const pathD = toPath(stroke.points);
           if (!pathD) return null;
-          const isGlow    = d.type === 'glow';
-          const glowW     = (stroke.strokeWidth + (isGlow ? 12 : 7)) * STROKE_SCALE;
-          const strokeW   = Math.max(0.8, stroke.strokeWidth * STROKE_SCALE);
+
+          const isGlow = d.type === 'glow';
+          const glowW = (stroke.strokeWidth + (isGlow ? 12 : 7)) * STROKE_SCALE;
+          const strokeW = Math.max(0.8, stroke.strokeWidth * STROKE_SCALE);
+
           return (
             <G key={item.id}>
               <Path
@@ -189,6 +201,7 @@ const TileMuralOverlay = React.memo(function TileMuralOverlay({ layers }: Overla
         if (d.type === 'erase') {
           const pathD = toPath(d.points);
           if (!pathD) return null;
+
           return (
             <Path
               key={item.id}
@@ -223,7 +236,8 @@ const TileMuralOverlay = React.memo(function TileMuralOverlay({ layers }: Overla
 
         if (d.type === 'teamStamp') {
           const ts = d as TeamStampItem;
-          const r  = Math.max(4, 7 * ts.scale);
+          const r = Math.max(4, 7 * ts.scale);
+
           return (
             <G key={item.id}>
               <Circle
@@ -247,74 +261,64 @@ const TileMuralOverlay = React.memo(function TileMuralOverlay({ layers }: Overla
 // ─── Poster tile ──────────────────────────────────────────────────────────────
 
 interface TileProps {
-  poster:      Poster;
-  initX:       number;
-  initY:       number;
-  posX:        Animated.Value;
-  posY:        Animated.Value;
-  scaleAnim:   Animated.Value;
-  layerCount:  number;
-  layers:      PosterLayerItem[];
-  pulseAnim:   Animated.Value;
-  onDragEnd:   (id: string, x: number, y: number) => void;
-  onTap:       (id: string) => void;
+  poster: Poster;
+  initX: number;
+  initY: number;
+  posX: Animated.Value;
+  posY: Animated.Value;
+  scaleAnim: Animated.Value;
+  layerCount: number;
+  layers: PosterLayerItem[];
+  pulseAnim: Animated.Value;
+  onDragEnd: (id: string, x: number, y: number) => void;
+  onTap: (id: string) => void;
 }
 
 const PosterTile = React.memo(function PosterTile({
   poster, initX, initY, posX, posY, scaleAnim,
   layerCount, layers, pulseAnim, onDragEnd, onTap,
 }: TileProps) {
-
-  // Always-current refs (updated inline during render)
   const onDragEndRef = useRef(onDragEnd);
-  const onTapRef     = useRef(onTap);
+  const onTapRef = useRef(onTap);
   onDragEndRef.current = onDragEnd;
-  onTapRef.current     = onTap;
+  onTapRef.current = onTap;
 
-  const curX          = useRef(initX);
-  const curY          = useRef(initY);
-  const dragStart     = useRef({ x: initX, y: initY });
-  const longActive    = useRef(false);   // true once long-press threshold reached
-  const longTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const curX = useRef(initX);
+  const curY = useRef(initY);
+  const dragStart = useRef({ x: initX, y: initY });
+  const longActive = useRef(false);
+  const longTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keep curX/curY in sync when position is reset externally
   useEffect(() => {
     curX.current = initX;
     curY.current = initY;
     posX.setValue(initX);
     posY.setValue(initY);
-  }, [initX, initY]);
+  }, [initX, initY, posX, posY]);
 
-  // ── PanResponder ────────────────────────────────────────────────────────────
   const dragPR = useRef(
     PanResponder.create({
-
-      // Always claim on start so we can detect long-press
-      onStartShouldSetPanResponder:        () => true,
+      onStartShouldSetPanResponder: () => true,
       onStartShouldSetPanResponderCapture: () => false,
-
-      // KEY: allow canvas to steal while long-press hasn't fired yet;
-      //      once longActive=true the poster keeps the gesture.
       onPanResponderTerminationRequest: () => !longActive.current,
 
       onPanResponderGrant: () => {
-        longActive.current  = false;
-        dragStart.current   = { x: curX.current, y: curY.current };
+        longActive.current = false;
+        dragStart.current = { x: curX.current, y: curY.current };
 
-        // Start long-press countdown
         longTimer.current = setTimeout(() => {
           longActive.current = true;
-          // Pop animation when drag mode activates
-          Animated.sequence([
-            Animated.spring(scaleAnim, {
-              toValue: 1.08, useNativeDriver: true, tension: 300, friction: 7,
-            }),
-          ]).start();
+          Animated.spring(scaleAnim, {
+            toValue: 1.08,
+            useNativeDriver: true,
+            tension: 300,
+            friction: 7,
+          }).start();
         }, LONG_PRESS_MS);
       },
 
       onPanResponderMove: (_, g) => {
-        if (!longActive.current) return; // not yet in drag mode
+        if (!longActive.current) return;
         const nx = dragStart.current.x + g.dx;
         const ny = dragStart.current.y + g.dy;
         posX.setValue(nx);
@@ -324,14 +328,19 @@ const PosterTile = React.memo(function PosterTile({
       },
 
       onPanResponderRelease: (_, g) => {
-        if (longTimer.current) { clearTimeout(longTimer.current); longTimer.current = null; }
+        if (longTimer.current) {
+          clearTimeout(longTimer.current);
+          longTimer.current = null;
+        }
 
         Animated.spring(scaleAnim, {
-          toValue: 1, useNativeDriver: true, tension: 200, friction: 7,
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 200,
+          friction: 7,
         }).start();
 
         if (longActive.current) {
-          // Save final position
           const nx = dragStart.current.x + g.dx;
           const ny = dragStart.current.y + g.dy;
           posX.setValue(nx);
@@ -340,20 +349,22 @@ const PosterTile = React.memo(function PosterTile({
           curY.current = ny;
           onDragEndRef.current(poster.id, nx, ny);
           longActive.current = false;
-        } else {
-          // Short tap: navigate only if barely moved
-          if (Math.abs(g.dx) < 6 && Math.abs(g.dy) < 6) {
-            onTapRef.current(poster.id);
-          }
+        } else if (Math.abs(g.dx) < 6 && Math.abs(g.dy) < 6) {
+          onTapRef.current(poster.id);
         }
       },
 
       onPanResponderTerminate: () => {
-        // Canvas (or OS) stole the gesture — cancel everything, snap back
-        if (longTimer.current) { clearTimeout(longTimer.current); longTimer.current = null; }
+        if (longTimer.current) {
+          clearTimeout(longTimer.current);
+          longTimer.current = null;
+        }
         longActive.current = false;
         Animated.spring(scaleAnim, {
-          toValue: 1, useNativeDriver: true, tension: 200, friction: 7,
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 200,
+          friction: 7,
         }).start();
       },
     }),
@@ -364,7 +375,6 @@ const PosterTile = React.memo(function PosterTile({
     : null;
 
   return (
-    // Outer: no overflow:hidden so badge can bleed outside
     <Animated.View
       {...dragPR.panHandlers}
       style={[
@@ -378,7 +388,6 @@ const PosterTile = React.memo(function PosterTile({
         },
       ]}
     >
-      {/* Inner: clips image, shows border */}
       <View
         style={[
           styles.tile,
@@ -397,7 +406,7 @@ const PosterTile = React.memo(function PosterTile({
               <Text style={styles.tilePlaceholderIcon}>🖼</Text>
             </View>
           )}
-          {/* Mural drawings overlay — cached from last fetch */}
+
           <TileMuralOverlay layers={layers} />
         </View>
 
@@ -407,7 +416,6 @@ const PosterTile = React.memo(function PosterTile({
         </View>
       </View>
 
-      {/* Layer count badge — outside overflow:hidden area */}
       {layerCount > 0 && (
         <Animated.View
           style={[styles.badge, { transform: [{ scale: pulseAnim }] }]}
@@ -416,7 +424,6 @@ const PosterTile = React.memo(function PosterTile({
           <Text style={styles.badgeText}>{layerCount > 99 ? '99+' : layerCount}</Text>
         </Animated.View>
       )}
-
     </Animated.View>
   );
 });
@@ -426,32 +433,34 @@ const PosterTile = React.memo(function PosterTile({
 export default function VaultScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const user   = useAuthStore((s) => s.user);
+  const user = useAuthStore((s) => s.user);
   const { posters, isLoading, loadVault } = useVaultStore();
 
-  const [positions, setPositions]         = useState<Record<string, { x: number; y: number }>>({});
-  const [layerCounts, setLayerCounts]     = useState<Record<string, number>>({});
-  const [layersMap, setLayersMap]         = useState<Record<string, PosterLayerItem[]>>({});
-  const [posReady, setPosReady]           = useState(false);
-  const [selectedPosterId, setSelected]   = useState<string | null>(null);   // bottom sheet
-  const [arPosterId, setArPosterId]       = useState<string | null>(null);   // AR camera
+  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [layerCounts, setLayerCounts] = useState<Record<string, number>>({});
+  const [layersMap, setLayersMap] = useState<Record<string, PosterLayerItem[]>>({});
+  const [posReady, setPosReady] = useState(false);
+  const [selectedPosterId, setSelected] = useState<string | null>(null);
+  const [arPosterId, setArPosterId] = useState<string | null>(null);
 
-  // ── Animated values ───────────────────────────────────────────────────────
+  const [showLeaderLost, setShowLeaderLost] = useState(false);
+  const [catVariant, setCatVariant] = useState<1 | 2>(1);
+  const alertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaderMapRef = useRef<Record<string, string | null>>({});
 
-  const canvasX   = useMemo(() => new Animated.Value(INIT_X), []);
-  const canvasY   = useMemo(() => new Animated.Value(INIT_Y), []);
+  const canvasX = useMemo(() => new Animated.Value(INIT_X), []);
+  const canvasY = useMemo(() => new Animated.Value(INIT_Y), []);
   const canvasOff = useRef({ x: INIT_X, y: INIT_Y });
-  const panStart  = useRef({ x: INIT_X, y: INIT_Y });
+  const panStart = useRef({ x: INIT_X, y: INIT_Y });
 
-  // Per-poster Animated values
-  const posAnims   = useRef<Record<string, { x: Animated.Value; y: Animated.Value; scale: Animated.Value }>>({});
+  const posAnims = useRef<Record<string, { x: Animated.Value; y: Animated.Value; scale: Animated.Value }>>({});
   const pulseAnims = useRef<Record<string, Animated.Value>>({});
 
   // ── Load vault ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (user?.id) loadVault(user.id);
-  }, [user?.id]);
+  }, [user?.id, loadVault]);
 
   useEffect(() => {
     if (!user?.id || posters.length === 0) return;
@@ -462,15 +471,16 @@ export default function VaultScreen() {
 
       posters.forEach((p) => {
         merged[p.id] = stored[p.id] ?? defaults[p.id];
-        const pos    = merged[p.id];
+        const pos = merged[p.id];
 
         if (!posAnims.current[p.id]) {
           posAnims.current[p.id] = {
-            x:     new Animated.Value(pos.x),
-            y:     new Animated.Value(pos.y),
+            x: new Animated.Value(pos.x),
+            y: new Animated.Value(pos.y),
             scale: new Animated.Value(1),
           };
         }
+
         if (!pulseAnims.current[p.id]) {
           pulseAnims.current[p.id] = new Animated.Value(1);
         }
@@ -479,71 +489,169 @@ export default function VaultScreen() {
       setPositions(merged);
       setPosReady(true);
     });
-  }, [posters.length, user?.id]);
+  }, [posters, user?.id]);
 
-  // ── Fetch cached mural layers for tile overlay ────────────────────────────
-  // Loaded once when the vault opens; not real-time (cached snapshot).
+  // ── Alert helper ───────────────────────────────────────────────────────────
+
+  const triggerLeaderLostAlert = useCallback(() => {
+    setCatVariant((v) => (v === 1 ? 2 : 1));
+    setShowLeaderLost(true);
+    Vibration.vibrate([0, 140, 90, 180]);
+
+    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+    alertTimerRef.current = setTimeout(() => setShowLeaderLost(false), 3000);
+  }, []);
+
+  // ── Sync one poster fully from DB ──────────────────────────────────────────
+
+  const syncPosterLayers = useCallback(
+    async (posterId: string) => {
+      try {
+        const freshLayers = await posterService
+          .fetchLayers(posterId)
+          .catch(() => [] as PosterLayerItem[]);
+
+        setLayersMap((prev) => {
+          const prevLayers = prev[posterId] ?? [];
+
+          const prevLeader = computePlayerScores(prevLayers)[0]?.userId ?? null;
+          const newLeader = computePlayerScores(freshLayers)[0]?.userId ?? null;
+
+          leaderMapRef.current[posterId] = newLeader;
+
+          if (prevLeader === user?.id && newLeader !== user?.id) {
+            triggerLeaderLostAlert();
+          }
+
+          return {
+            ...prev,
+            [posterId]: freshLayers,
+          };
+        });
+
+        setLayerCounts((prev) => ({
+          ...prev,
+          [posterId]: freshLayers.length,
+        }));
+      } catch {
+        // silent fail
+      }
+    },
+    [user?.id, triggerLeaderLostAlert],
+  );
+
+  // ── Câte postere conduc? ──────────────────────────────────────────────────
+
+  const leaderCount = useMemo(() => {
+    if (!user?.id) return 0;
+
+    return posters.filter((p) => {
+      const layers = layersMap[p.id];
+      if (!layers || layers.length === 0) return false;
+      return computePlayerScores(layers)[0]?.userId === user.id;
+    }).length;
+  }, [layersMap, posters, user?.id]);
+
+  // ── Initial full fetch of layers ───────────────────────────────────────────
 
   useEffect(() => {
     if (posters.length === 0) return;
+
     let cancelled = false;
 
     (async () => {
       try {
-        // Fetch all posters in parallel — each call returns [] on error (silent)
         const results = await Promise.all(
           posters.map((p) =>
             posterService.fetchLayers(p.id).catch(() => [] as PosterLayerItem[])
           )
         );
+
         if (cancelled) return;
-        const map: Record<string, PosterLayerItem[]> = {};
-        posters.forEach((p, i) => { map[p.id] = results[i]; });
-        setLayersMap(map);
+
+        const nextLayersMap: Record<string, PosterLayerItem[]> = {};
+        const nextCounts: Record<string, number> = {};
+        const nextLeaderMap: Record<string, string | null> = {};
+
+        posters.forEach((p, i) => {
+          const layers = results[i] ?? [];
+          nextLayersMap[p.id] = layers;
+          nextCounts[p.id] = layers.length;
+          nextLeaderMap[p.id] = computePlayerScores(layers)[0]?.userId ?? null;
+        });
+
+        setLayersMap(nextLayersMap);
+        setLayerCounts(nextCounts);
+        leaderMapRef.current = nextLeaderMap;
       } catch {
-        // silently ignore — tile overlay just stays empty
+        // silent fail
       }
     })();
 
-    return () => { cancelled = true; };
-  }, [posters.map((p) => p.id).join(',')]);
+    return () => {
+      cancelled = true;
+    };
+  }, [posters]);
 
-  // ── Realtime layer counts ─────────────────────────────────────────────────
+  // ── Realtime sync ──────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (posters.length === 0) return;
+
     const ids = posters.map((p) => p.id);
 
-    supabase
-      .from('mural_layers')
-      .select('poster_id')
-      .in('poster_id', ids)
-      .then(({ data }) => {
-        if (!data) return;
-        const counts: Record<string, number> = {};
-        data.forEach((row) => { counts[row.poster_id] = (counts[row.poster_id] ?? 0) + 1; });
-        setLayerCounts(counts);
-      });
+    const runPulse = (posterId: string) => {
+      const anim = pulseAnims.current[posterId];
+      if (!anim) return;
+
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1.5,
+          duration: 140,
+          useNativeDriver: true,
+        }),
+        Animated.spring(anim, {
+          toValue: 1,
+          useNativeDriver: true,
+          bounciness: 14,
+        }),
+      ]).start();
+    };
+
+    const handleRealtimeChange = async (payload: any) => {
+      const pid =
+        (payload?.new?.poster_id as string | undefined) ??
+        (payload?.old?.poster_id as string | undefined);
+
+      if (!pid || !ids.includes(pid)) return;
+
+      runPulse(pid);
+      await syncPosterLayers(pid);
+    };
 
     const ch = supabase
-      .channel('vault_layers')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mural_layers' },
-        (payload) => {
-          const pid = payload.new?.poster_id as string | undefined;
-          if (!pid || !ids.includes(pid)) return;
-          setLayerCounts((prev) => ({ ...prev, [pid]: (prev[pid] ?? 0) + 1 }));
-          const anim = pulseAnims.current[pid];
-          if (anim) {
-            Animated.sequence([
-              Animated.timing(anim, { toValue: 1.5, duration: 140, useNativeDriver: true }),
-              Animated.spring(anim,  { toValue: 1, useNativeDriver: true, bounciness: 14 }),
-            ]).start();
-          }
-        })
+      .channel('vault_layers_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'mural_layers' },
+        handleRealtimeChange,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mural_layers' },
+        handleRealtimeChange,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'mural_layers' },
+        handleRealtimeChange,
+      )
       .subscribe();
 
-    return () => { supabase.removeChannel(ch); };
-  }, [posters.map((p) => p.id).join(',')]);
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [posters, syncPosterLayers]);
 
   // ── Drag end handler ──────────────────────────────────────────────────────
 
@@ -558,22 +666,25 @@ export default function VaultScreen() {
     [user?.id],
   );
 
-  const handleTap = useCallback(
-    (id: string) => { setSelected(id); },
-    [],
-  );
+  useEffect(() => {
+    return () => {
+      if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+      Vibration.cancel();
+    };
+  }, []);
+
+  const handleTap = useCallback((id: string) => {
+    setSelected(id);
+  }, []);
 
   // ── Canvas PanResponder ───────────────────────────────────────────────────
-  // onStart=false → only claims on move; poster long-press takes priority
-  // because onPanResponderTerminationRequest on the poster returns false once
-  // the long-press fires, blocking the canvas from stealing.
 
   const canvasPR = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder:        () => false,
+      onStartShouldSetPanResponder: () => false,
       onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponder:         () => true,
-      onMoveShouldSetPanResponderCapture:  () => false,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => false,
 
       onPanResponderGrant: () => {
         panStart.current = { ...canvasOff.current };
@@ -611,7 +722,11 @@ export default function VaultScreen() {
         <Text style={styles.emptyIcon}>🧱</Text>
         <Text style={styles.emptyTitle}>Your wall is empty</Text>
         <Text style={styles.emptyBody}>Scan a real poster to add it to your wall.</Text>
-        <TouchableOpacity style={styles.scanBtn} onPress={() => router.push('/scanner')} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.scanBtn}
+          onPress={() => router.push('/scanner')}
+          activeOpacity={0.85}
+        >
           <Text style={styles.scanBtnText}>SCAN NOW</Text>
         </TouchableOpacity>
       </View>
@@ -620,18 +735,26 @@ export default function VaultScreen() {
 
   return (
     <View style={styles.screen}>
+      <LeaderAlert
+        visible={showLeaderLost}
+        imageSource={catVariant === 1 ? CAT_ALERT_1 : CAT_ALERT_2}
+        title="Sorry..."
+        subtitle="Someone just took your #1 spot on a poster!"
+      />
 
-      {/* ── Pannable canvas ── */}
       <View style={styles.canvasWrap} {...canvasPR.panHandlers}>
         <Animated.View
-          style={[styles.canvas, { transform: [{ translateX: canvasX }, { translateY: canvasY }] }]}
+          style={[
+            styles.canvas,
+            { transform: [{ translateX: canvasX }, { translateY: canvasY }] },
+          ]}
         >
           <WallPattern />
 
           {posReady && posters.map((poster) => {
-            const anim  = posAnims.current[poster.id];
+            const anim = posAnims.current[poster.id];
             const pulse = pulseAnims.current[poster.id];
-            const pos   = positions[poster.id];
+            const pos = positions[poster.id];
             if (!anim || !pulse || !pos) return null;
 
             return (
@@ -654,20 +777,27 @@ export default function VaultScreen() {
         </Animated.View>
       </View>
 
-      {/* ── Header overlay ── */}
       <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
         <View style={styles.headerRow} pointerEvents="none">
           <View>
-            <Text style={styles.headerTitle}>VAULT</Text>
+            <Text style={styles.headerTitle}>YOUR WALL</Text>
             <Text style={styles.headerSub}>
               {posters.length} poster{posters.length !== 1 ? 's' : ''}
-              {'  •  hold a poster to move it'}
+              {'  •  hold to move'}
             </Text>
           </View>
+
+          {leaderCount > 0 && (
+            <View style={styles.leaderBadge}>
+              <Text style={styles.leaderBadgeIcon}>👑</Text>
+              <Text style={styles.leaderBadgeText}>
+                {leaderCount} leader{leaderCount !== 1 ? 's' : ''}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
-      {/* ── Scan FAB ── */}
       <TouchableOpacity
         style={[styles.fab, { bottom: insets.bottom + 20 }]}
         onPress={() => router.push('/scanner')}
@@ -677,7 +807,6 @@ export default function VaultScreen() {
         <Text style={styles.fabTxt}>SCAN</Text>
       </TouchableOpacity>
 
-      {/* ── Poster action bottom sheet ── */}
       <Modal
         visible={!!selectedPosterId}
         transparent
@@ -690,24 +819,24 @@ export default function VaultScreen() {
           activeOpacity={1}
           onPress={() => setSelected(null)}
         />
+
         {(() => {
           const sel = posters.find((p) => p.id === selectedPosterId);
           if (!sel) return null;
+
           const tc = sel.territory?.ownerTeamId
             ? TEAM_COLORS[sel.territory.ownerTeamId]?.primary
             : null;
+
           return (
             <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
-              {/* Drag handle */}
               <View style={styles.sheetHandle} />
 
-              {/* Poster name + team dot */}
               <View style={styles.sheetHeader}>
                 {tc && <View style={[styles.sheetTeamDot, { backgroundColor: tc }]} />}
                 <Text style={styles.sheetTitle} numberOfLines={1}>{sel.name}</Text>
               </View>
 
-              {/* Action buttons */}
               <TouchableOpacity
                 style={styles.sheetBtn}
                 activeOpacity={0.82}
@@ -736,19 +865,17 @@ export default function VaultScreen() {
         })()}
       </Modal>
 
-      {/* ── AR Preview Modal ── */}
       {arPosterId && (() => {
         const arPoster = posters.find((p) => p.id === arPosterId);
         return (
           <ARPreviewModal
-            visible={true}
+            visible
             posterName={arPoster?.name ?? ''}
             layers={layersMap[arPosterId] ?? []}
             onClose={() => setArPosterId(null)}
           />
         );
       })()}
-
     </View>
   );
 }
@@ -761,251 +888,268 @@ const styles = StyleSheet.create({
   canvasWrap: { flex: 1, overflow: 'hidden' },
   canvas: {
     position: 'absolute',
-    width:    CANVAS_W,
-    height:   CANVAS_H,
+    width: CANVAS_W,
+    height: CANVAS_H,
   },
 
-  // ── Tile ──────────────────────────────────────────────────────────────────
   tileOuter: {
     position: 'absolute',
-    width:    POSTER_W,
-    height:   POSTER_H,
+    width: POSTER_W,
+    height: POSTER_H,
     ...Platform.select({
       ios: {
-        shadowColor:   '#000',
-        shadowOffset:  { width: 0, height: 6 },
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.7,
-        shadowRadius:  10,
+        shadowRadius: 10,
       },
     }),
   },
   tile: {
-    flex:            1,
-    borderRadius:    10,
-    overflow:        'hidden',
+    flex: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
     backgroundColor: '#111115',
-    borderWidth:     1,
-    borderColor:     'rgba(255,255,255,0.13)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.13)',
   },
   tileImageWrap: {
-    width:    '100%',
-    height:   TILE_IMG_H,
+    width: '100%',
+    height: TILE_IMG_H,
     overflow: 'hidden',
     position: 'relative',
   },
   tilePlaceholder: {
-    width:           '100%',
-    height:          TILE_IMG_H,
-    alignItems:      'center',
-    justifyContent:  'center',
+    width: '100%',
+    height: TILE_IMG_H,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#1A1A20',
   },
   tilePlaceholderIcon: { fontSize: 30 },
   tileInfo: {
-    flexDirection:     'row',
-    alignItems:        'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 7,
-    paddingVertical:   6,
-    backgroundColor:   'rgba(0,0,0,0.9)',
-    gap:               5,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    gap: 5,
   },
   tileName: {
-    flex:          1,
-    color:         Colors.textPrimary,
-    fontSize:      9,
-    fontWeight:    '800',
+    flex: 1,
+    color: Colors.textPrimary,
+    fontSize: 9,
+    fontWeight: '800',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   teamDot: { width: 7, height: 7, borderRadius: 999 },
 
-  // ── Bottom sheet ──────────────────────────────────────────────────────────
   sheetBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   sheet: {
-    position:          'absolute',
-    bottom:            0,
-    left:              0,
-    right:             0,
-    backgroundColor:   '#111115',
-    borderTopLeftRadius:  22,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#111115',
+    borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
-    borderTopWidth:    1,
-    borderColor:       'rgba(255,255,255,0.1)',
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     paddingHorizontal: 20,
-    paddingTop:        12,
-    gap:               10,
+    paddingTop: 12,
+    gap: 10,
   },
   sheetHandle: {
-    alignSelf:       'center',
-    width:           40,
-    height:          4,
-    borderRadius:    2,
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.2)',
-    marginBottom:    8,
+    marginBottom: 8,
   },
   sheetHeader: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            8,
-    marginBottom:   4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
   },
   sheetTeamDot: {
-    width:        10,
-    height:       10,
+    width: 10,
+    height: 10,
     borderRadius: 999,
   },
   sheetTitle: {
-    color:         '#fff',
-    fontSize:      16,
-    fontWeight:    '800',
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
     letterSpacing: 0.4,
-    flex:          1,
+    flex: 1,
   },
   sheetBtn: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    justifyContent:    'center',
-    gap:               10,
-    backgroundColor:   '#00E5FF',
-    borderRadius:      14,
-    paddingVertical:   15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#00E5FF',
+    borderRadius: 14,
+    paddingVertical: 15,
     paddingHorizontal: 20,
   },
   sheetBtnAR: {
     backgroundColor: 'rgba(0,229,255,0.08)',
-    borderWidth:     1.5,
-    borderColor:     '#00E5FF',
+    borderWidth: 1.5,
+    borderColor: '#00E5FF',
   },
   sheetBtnText: {
-    color:         '#000',
-    fontSize:      14,
-    fontWeight:    '900',
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '900',
     letterSpacing: 1.1,
   },
 
   badge: {
-    position:          'absolute',
-    top:               -7,
-    left:              -7,
-    minWidth:          22,
-    height:            22,
-    borderRadius:      999,
-    backgroundColor:   Colors.accentPink,
-    alignItems:        'center',
-    justifyContent:    'center',
+    position: 'absolute',
+    top: -7,
+    left: -7,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 999,
+    backgroundColor: Colors.accentPink,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 5,
-    borderWidth:       1.5,
-    borderColor:       '#09090C',
+    borderWidth: 1.5,
+    borderColor: '#09090C',
   },
   badgeText: {
-    color:         '#fff',
-    fontSize:      9,
-    fontWeight:    '900',
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '900',
     letterSpacing: 0.3,
   },
 
-  // ── Header ────────────────────────────────────────────────────────────────
   header: {
-    position:          'absolute',
-    top: 0, left: 0, right: 0,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     paddingHorizontal: Spacing[4],
-    paddingBottom:     10,
-    backgroundColor:   'rgba(9,9,12,0.82)',
+    paddingBottom: 10,
+    backgroundColor: 'rgba(9,9,12,0.82)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   headerRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
+  leaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255,215,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,215,0,0.4)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  leaderBadgeIcon: { fontSize: 13 },
+  leaderBadgeText: {
+    color: '#FFD700',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+
   headerTitle: {
-    color:         Colors.textPrimary,
-    fontSize:      Typography.fontSizes.lg,
-    fontWeight:    Typography.fontWeights.black,
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSizes.lg,
+    fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.widest,
     textTransform: 'uppercase',
   },
   headerSub: {
-    color:         Colors.textMuted,
-    fontSize:      10,
+    color: Colors.textMuted,
+    fontSize: 10,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    marginTop:     2,
+    marginTop: 2,
   },
 
-  // ── FAB ───────────────────────────────────────────────────────────────────
   fab: {
-    position:          'absolute',
-    right:             20,
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               6,
+    position: 'absolute',
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 18,
-    paddingVertical:   12,
-    borderRadius:      999,
-    backgroundColor:   Colors.accentCyan,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: Colors.accentCyan,
     ...Platform.select({
       ios: {
-        shadowColor:   Colors.accentCyan,
-        shadowOffset:  { width: 0, height: 0 },
+        shadowColor: Colors.accentCyan,
+        shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.55,
-        shadowRadius:  12,
+        shadowRadius: 12,
       },
     }),
   },
   fabTxt: {
-    color:         '#000',
-    fontSize:      12,
-    fontWeight:    '900',
+    color: '#000',
+    fontSize: 12,
+    fontWeight: '900',
     letterSpacing: 1.1,
     textTransform: 'uppercase',
   },
 
-  // ── Empty / loading ───────────────────────────────────────────────────────
   center: {
-    flex:              1,
-    alignItems:        'center',
-    justifyContent:    'center',
-    backgroundColor:   '#09090C',
-    gap:               Spacing[3],
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#09090C',
+    gap: Spacing[3],
     paddingHorizontal: Spacing[8],
   },
   loadingText: {
-    color:         Colors.textMuted,
-    fontSize:      Typography.fontSizes.sm,
+    color: Colors.textMuted,
+    fontSize: Typography.fontSizes.sm,
     letterSpacing: 0.5,
-    marginTop:     Spacing[2],
+    marginTop: Spacing[2],
   },
-  emptyIcon:  { fontSize: 64, marginBottom: Spacing[2] },
+  emptyIcon: { fontSize: 64, marginBottom: Spacing[2] },
   emptyTitle: {
-    color:         Colors.textPrimary,
-    fontSize:      Typography.fontSizes.xl,
-    fontWeight:    Typography.fontWeights.black,
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSizes.xl,
+    fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.wider,
     textTransform: 'uppercase',
-    textAlign:     'center',
+    textAlign: 'center',
   },
   emptyBody: {
-    color:      Colors.textMuted,
-    fontSize:   Typography.fontSizes.sm,
-    textAlign:  'center',
+    color: Colors.textMuted,
+    fontSize: Typography.fontSizes.sm,
+    textAlign: 'center',
     lineHeight: 20,
   },
   scanBtn: {
-    marginTop:         Spacing[4],
+    marginTop: Spacing[4],
     paddingHorizontal: 28,
-    paddingVertical:   13,
-    borderRadius:      999,
-    backgroundColor:   Colors.accentCyan,
+    paddingVertical: 13,
+    borderRadius: 999,
+    backgroundColor: Colors.accentCyan,
   },
   scanBtnText: {
-    color:         '#000',
-    fontSize:      13,
-    fontWeight:    '900',
+    color: '#000',
+    fontSize: 13,
+    fontWeight: '900',
     letterSpacing: 1.3,
     textTransform: 'uppercase',
   },

@@ -11,6 +11,7 @@
  * - selected point pulses
  * - unlocked points open poster room
  * - locked points redirect to scanner
+ * - team owner highlight on point number
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -40,8 +41,8 @@ const FLOOR_MAP = require('../_layout/floorMap.png');
 
 type HuntPointLayout = {
   slot: number;
-  x: number; // 0..1
-  y: number; // 0..1
+  x: number;
+  y: number;
 };
 
 type HuntPoint = HuntPointLayout & {
@@ -76,6 +77,8 @@ function getTeamAccent(poster: Poster, unlocked: boolean) {
       border: '#8e98aa',
       glow: '#555e6f',
       text: '#dfe4ec',
+      numberBg: '#3b4350',
+      numberText: '#ffffff',
     };
   }
 
@@ -85,17 +88,29 @@ function getTeamAccent(poster: Poster, unlocked: boolean) {
       border: '#98f4bc',
       glow: '#1fdc72',
       text: '#ffffff',
+      numberBg: '#1fdc72',
+      numberText: '#07130c',
     };
   }
 
   const tc = TEAM_COLORS[poster.territory.ownerTeamId as TeamId];
+  const primary = tc.primary;
+  const glow = tc.glow ?? tc.primary;
 
   return {
-    primary: tc.primary,
-    border: tc.primary,
-    glow: tc.glow ?? tc.primary,
+    primary,
+    border: primary,
+    glow,
     text: '#ffffff',
+    numberBg: primary,
+    numberText: '#ffffff',
   };
+}
+
+function getOwnerLabel(poster: Poster, unlocked: boolean) {
+  if (!unlocked) return 'LOCKED';
+  if (!poster.territory.ownerTeamId) return 'CONTESTED';
+  return poster.territory.ownerTeamId.toUpperCase();
 }
 
 function HuntNode({
@@ -162,7 +177,24 @@ function HuntNode({
           selected && styles.nodeSelected,
         ]}
       >
-        <Text style={styles.nodeNumber}>{formatSlot(point.slot)}</Text>
+        <View
+          style={[
+            styles.nodeNumberBadge,
+            {
+              backgroundColor: accent.numberBg,
+              borderColor: selected ? '#ffffff' : 'rgba(255,255,255,0.18)',
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.nodeNumber,
+              { color: accent.numberText },
+            ]}
+          >
+            {formatSlot(point.slot)}
+          </Text>
+        </View>
 
         <View style={styles.nodeIconWrap}>
           <Text style={styles.nodeIcon}>{unlocked ? '✓' : '🔒'}</Text>
@@ -225,6 +257,10 @@ export default function MapScreen() {
   const selectedUnlocked = selectedPoint
     ? vaultStore.hasScanned(selectedPoint.poster.id)
     : false;
+
+  const selectedAccent = selectedPoint
+    ? getTeamAccent(selectedPoint.poster, selectedUnlocked)
+    : null;
 
   return (
     <ScreenContainer scrollable padded={false}>
@@ -367,9 +403,30 @@ export default function MapScreen() {
               </View>
 
               <View style={styles.metaBox}>
+                <Text style={styles.metaLabel}>Owner</Text>
+                <Text
+                  style={[
+                    styles.metaValue,
+                    selectedAccent ? { color: selectedAccent.primary } : null,
+                  ]}
+                >
+                  {getOwnerLabel(selectedPoint.poster, selectedUnlocked)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.metaRow}>
+              <View style={styles.metaBox}>
                 <Text style={styles.metaLabel}>Last activity</Text>
                 <Text style={styles.metaValue}>
                   {timeAgo(selectedPoint.poster.territory.lastActivityAt)}
+                </Text>
+              </View>
+
+              <View style={styles.metaBox}>
+                <Text style={styles.metaLabel}>Heat</Text>
+                <Text style={styles.metaValue}>
+                  {Math.round((selectedPoint.poster.territory.heat ?? 0) * 100)}%
                 </Text>
               </View>
             </View>
@@ -569,9 +626,17 @@ const styles = StyleSheet.create({
   nodeSelected: {
     borderWidth: 2.4,
   },
+  nodeNumberBadge: {
+    minWidth: 24,
+    height: 18,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
   nodeNumber: {
-    color: '#ffffff',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '900',
     letterSpacing: 0.4,
   },

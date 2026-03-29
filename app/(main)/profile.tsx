@@ -3,7 +3,7 @@
  * Artist profile — badge echipă mare + butoane imagine pentru CTA.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -32,8 +32,13 @@ const TEAM_INITIALS: Record<string, string> = {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user, logout, refreshUser } = useAuthStore();
   const vaultCount = useVaultStore((s) => s.posters.length);
+
+  // Refresh score + postersContributed din Supabase la fiecare deschidere a profilului
+  useEffect(() => {
+    refreshUser();
+  }, []);
 
   const [badgeErr, setBadgeErr]         = useState(false);
   const [vaultImgErr, setVaultImgErr]   = useState(false);
@@ -117,9 +122,9 @@ export default function ProfileScreen() {
 
       {/* ── Stats ────────────────────────────────────────── */}
       <View style={styles.statsRow}>
-        <StatBox label="Score"   value={user.score.toLocaleString()}          color={tc.primary} glow={tc.glow} />
-        <StatBox label="Posters" value={user.postersContributed.toString()}   color={tc.primary} glow={tc.glow} />
-        <StatBox label="Vault"   value={vaultCount.toString()}                color={tc.primary} glow={tc.glow} />
+        <StatBox label="Score"   value={user.score.toLocaleString()}  color={tc.primary} glow={tc.glow} />
+        <StatBox label="Posters" value={vaultCount.toString()}        color={tc.primary} glow={tc.glow} />
+        <StatBox label="Layers"  value={user.postersContributed.toString()} color={tc.primary} glow={tc.glow} />
       </View>
 
       {/* ── CTA imagine — Open Vault ─────────────────────── */}

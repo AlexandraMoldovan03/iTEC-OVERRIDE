@@ -150,6 +150,21 @@ export const authService = {
     }
   },
 
+  /** Re-fetch score + posters_contributed from Supabase for a given userId. */
+  async refreshProfile(userId: string): Promise<User | null> {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, team_id, score, posters_contributed, avatar_url, created_at')
+        .eq('id', userId)
+        .single();
+      if (error || !data) return null;
+      return mapProfileToUser(data);
+    } catch {
+      return null;
+    }
+  },
+
   async restoreSession(): Promise<AuthResult | null> {
     try {
       const { data, error } = await supabase.auth.getSession();

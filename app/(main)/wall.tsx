@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   FlatList,
   Image,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
@@ -14,12 +15,17 @@ import { TeamBadge } from '../../src/components/ui/TeamBadge';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useVaultStore } from '../../src/stores/vaultStore';
 import { Colors, Spacing, Typography, Radius } from '../../src/theme';
+import { supabase } from '../../src/lib/supabase';
+import { posterService } from '../../src/services/posterService';
+import { Poster } from '../../src/types/poster';
+import { PosterLayerItem } from '../../src/types/mural';
+import { TeamId } from '../../src/types/team';
+import { computePlayerScores, computeTeamScores } from '../../src/utils/scoring';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 14;
 const CARD_WIDTH = (width - Spacing[4] * 2 - CARD_GAP) / 2;
 
-type TeamId = 'minimalist' | 'perfectionist' | 'chaotic';
 type FilterKey = 'all' | 'recent' | 'hot' | 'myTeam';
 
 type WallPoster = {
@@ -31,10 +37,11 @@ type WallPoster = {
   lastActivityLabel: string;
   layerCount: number;
   contributorsCount: number;
-  dominantTeam: TeamId;
+  dominantTeam: TeamId | null;
   heat: number;
   isHot: boolean;
   myContributionCount: number;
+  lastActivityAt: string | null;
 };
 
 const FILTERS: { key: FilterKey; label: string }[] = [
@@ -44,38 +51,103 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'myTeam', label: 'MY TEAM' },
 ];
 
-const TEAM_COLORS: Record<TeamId, string> = {
+const TEAM_ACCENTS: Record<TeamId, string> = {
   minimalist: '#EAEAEA',
   perfectionist: '#12D6FF',
   chaotic: '#FF2E6E',
 };
 
-function buildWallPosters(source: any[]): WallPoster[] {
-  return source.map((poster: any, index: number) => {
-    const dominantTeams: TeamId[] = ['chaotic', 'perfectionist', 'minimalist'];
-    const dominantTeam = dominantTeams[index % dominantTeams.length];
-    const layerCount = 8 + ((index * 7) % 38);
-    const contributorsCount = 2 + (index % 6);
-    const heat = 45 + ((index * 13) % 55);
+function timeAgoShort(dateString?: string | null) {
+  if (!dateString) return 'just now';
 
-    return {
-      id: poster.id,
-      title: poster.title ?? poster.name ?? `Poster ${index + 1}`,
-      location:
-        poster.location?.address ??
-        poster.location?.name ??
-        'Unknown location',
-      thumbnail: poster.thumbnailUri ?? poster.thumbnail ?? undefined,
-      scannedAtLabel: `${(index % 6) + 1}d ago`,
-      lastActivityLabel: `${(index % 5) + 1}h ago`,
-      layerCount,
-      contributorsCount,
-      dominantTeam,
-      heat,
-      isHot: heat >= 75,
-      myContributionCount: 1 + (index % 5),
-    };
-  });
+  const now = Date.now();
+  const then = new Date(dateString).getTime();
+  const diffMs = Math.max(0, now - then);
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return 'now';
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}m ago`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
+  return `${Math.floor(diffMs / day)}d ago`;
+}
+
+function deriveHeat(layerCount: number, contributorsCount: number, lastActivityAt: string | null) {
+  const activityBonus = (() => {
+    if (!lastActivityAt) return 0;
+    const diff = Date.now() - new Date(lastActivityAt).getTime();
+    if (diff <= 60 * 60 * 1000) return 28;
+    if (diff <= 3 * 60 * 60 * 1000) return 22;
+    if (diff <= 12 * 60 * 60 * 1000) return 14;
+    if (diff <= 24 * 60 * 60 * 1000) return 8;
+    return 0;
+  })();
+
+  const raw = Math.min(
+    100,
+    layerCount * 2 + contributorsCount * 7 + activityBonus + 18
+  );
+
+  return raw;
+}
+
+function getDominantTeam(layers: PosterLayerItem[]): TeamId | null {
+  if (!layers.length) return null;
+  const scores = computeTeamScores(layers);
+  return (scores[0]?.teamId as TeamId | undefined) ?? null;
+}
+
+function buildWallPoster(
+  poster: Poster,
+  layers: PosterLayerItem[],
+  currentUserId?: string | null,
+): WallPoster {
+  const uniqueAuthors = new Set(
+    layers
+      .map((l) => l.authorId)
+      .filter(Boolean)
+  );
+
+  const myContributionCount = currentUserId
+    ? layers.filter((l) => l.authorId === currentUserId).length
+    : 0;
+
+  const lastActivityAt =
+    layers.length > 0
+      ? [...layers]
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )[0]?.createdAt ?? poster.territory?.lastActivityAt ?? null
+      : poster.territory?.lastActivityAt ?? null;
+
+  const layerCount = layers.length;
+  const contributorsCount = uniqueAuthors.size;
+  const dominantTeam = getDominantTeam(layers);
+  const heat = deriveHeat(layerCount, contributorsCount, lastActivityAt);
+  const isHot = heat >= 75;
+
+  return {
+    id: poster.id,
+    title: poster.title ?? poster.name ?? 'Untitled poster',
+    location:
+      poster.location?.label ??
+      poster.location?.address ??
+      poster.location?.name ??
+      'Unknown location',
+    thumbnail: poster.referenceImageUrl ?? poster.thumbnailUri ?? poster.thumbnail ?? undefined,
+    scannedAtLabel: 'Unlocked',
+    lastActivityLabel: timeAgoShort(lastActivityAt),
+    layerCount,
+    contributorsCount,
+    dominantTeam,
+    heat,
+    isHot,
+    myContributionCount,
+    lastActivityAt,
+  };
 }
 
 export default function WallScreen() {
@@ -84,28 +156,124 @@ export default function WallScreen() {
   const { posters: vaultPosters, loadVault } = useVaultStore();
 
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
+  const [layersMap, setLayersMap] = useState<Record<string, PosterLayerItem[]>>({});
+  const [loadingLive, setLoadingLive] = useState(true);
 
   useEffect(() => {
     if (user?.id) {
       loadVault(user.id);
     }
-  }, [user?.id]);
+  }, [user?.id, loadVault]);
 
-  // Wall shows ONLY scanned posters — no mock fallback
-  const rawPosters = useMemo(() => {
-    return buildWallPosters(vaultPosters);
+  const syncPosterLayers = useCallback(async (posterId: string) => {
+    try {
+      const layers = await posterService.fetchLayers(posterId).catch(() => [] as PosterLayerItem[]);
+      setLayersMap((prev) => ({
+        ...prev,
+        [posterId]: layers,
+      }));
+    } catch {
+      // silent fail
+    }
+  }, []);
+
+  useEffect(() => {
+    if (vaultPosters.length === 0) {
+      setLayersMap({});
+      setLoadingLive(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingLive(true);
+
+    (async () => {
+      try {
+        const results = await Promise.all(
+          vaultPosters.map((poster) =>
+            posterService.fetchLayers(poster.id).catch(() => [] as PosterLayerItem[])
+          )
+        );
+
+        if (cancelled) return;
+
+        const nextMap: Record<string, PosterLayerItem[]> = {};
+        vaultPosters.forEach((poster, index) => {
+          nextMap[poster.id] = results[index] ?? [];
+        });
+
+        setLayersMap(nextMap);
+      } finally {
+        if (!cancelled) setLoadingLive(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [vaultPosters]);
+
+  useEffect(() => {
+    if (vaultPosters.length === 0) return;
+
+    const posterIds = vaultPosters.map((p) => p.id);
+
+    const handleRealtime = async (payload: any) => {
+      const posterId =
+        (payload?.new?.poster_id as string | undefined) ??
+        (payload?.old?.poster_id as string | undefined);
+
+      if (!posterId || !posterIds.includes(posterId)) return;
+      await syncPosterLayers(posterId);
+    };
+
+    const channel = supabase
+      .channel('wall_live_layers')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'mural_layers' },
+        handleRealtime,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mural_layers' },
+        handleRealtime,
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'mural_layers' },
+        handleRealtime,
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [vaultPosters, syncPosterLayers]);
+
+  const rawPosters = useMemo(() => {
+    return vaultPosters.map((poster) =>
+      buildWallPoster(poster, layersMap[poster.id] ?? [], user?.id)
+    );
+  }, [vaultPosters, layersMap, user?.id]);
 
   const filteredPosters = useMemo(() => {
     switch (activeFilter) {
       case 'recent':
-        return [...rawPosters].sort((a, b) => b.myContributionCount - a.myContributionCount);
+        return [...rawPosters].sort((a, b) => {
+          const aTime = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0;
+          const bTime = b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0;
+          return bTime - aTime;
+        });
+
       case 'hot':
         return rawPosters
           .filter((p) => p.isHot)
           .sort((a, b) => b.heat - a.heat);
+
       case 'myTeam':
         return rawPosters.filter((p) => p.dominantTeam === user?.teamId);
+
       case 'all':
       default:
         return rawPosters;
@@ -115,6 +283,7 @@ export default function WallScreen() {
   const totalLayers = rawPosters.reduce((sum, p) => sum + p.layerCount, 0);
   const totalArtists = rawPosters.reduce((sum, p) => sum + p.contributorsCount, 0);
   const hotWalls = rawPosters.filter((p) => p.isHot).length;
+  const totalMyTags = rawPosters.reduce((sum, p) => sum + p.myContributionCount, 0);
 
   const handleOpenPoster = (posterId: string) => {
     router.push(`/poster/${posterId}`);
@@ -122,34 +291,32 @@ export default function WallScreen() {
 
   return (
     <ScreenContainer scrollable padded={false} style={styles.screen}>
-      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>CITY ARCHIVE // YOUR TAG HISTORY</Text>
+        <Text style={styles.eyebrow}>CITY ARCHIVE // LIVE WALL DATA</Text>
         <Text style={styles.title}>YOUR WALL</Text>
         <Text style={styles.subtitle}>
-          Every scanned poster lives here with the traces, layers, and chaos
-          left behind by everyone who entered the battle.
+          Every scanned poster is tracked here with live layers, contributors,
+          team dominance, and recent wall activity.
         </Text>
 
-        {user && (
+        {user?.teamId && (
           <View style={styles.teamBadgeWrap}>
             <TeamBadge teamId={user.teamId} />
           </View>
         )}
       </View>
 
-      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={[styles.statCard, styles.statCardWide]}>
           <Text style={styles.statLabel}>SCANNED WALLS</Text>
           <Text style={styles.statValue}>{rawPosters.length}</Text>
-          <Text style={styles.statHint}>Your personal city archive</Text>
+          <Text style={styles.statHint}>Unlocked by your scans</Text>
         </View>
 
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>LAYERS</Text>
           <Text style={styles.statValue}>{totalLayers}</Text>
-          <Text style={styles.statHint}>Marks on the wall</Text>
+          <Text style={styles.statHint}>Live mural layers</Text>
         </View>
       </View>
 
@@ -157,17 +324,32 @@ export default function WallScreen() {
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>ARTISTS</Text>
           <Text style={styles.statValue}>{totalArtists}</Text>
-          <Text style={styles.statHint}>Seen in your scans</Text>
+          <Text style={styles.statHint}>Unique contributors</Text>
         </View>
 
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>HOT WALLS</Text>
           <Text style={styles.statValue}>{hotWalls}</Text>
-          <Text style={styles.statHint}>Still under attack</Text>
+          <Text style={styles.statHint}>High activity zones</Text>
         </View>
       </View>
 
-      {/* Filters */}
+      <View style={styles.statsRow}>
+        <View style={[styles.statCard, styles.statCardWide]}>
+          <Text style={styles.statLabel}>YOUR TAGS</Text>
+          <Text style={styles.statValue}>{totalMyTags}</Text>
+          <Text style={styles.statHint}>Your visible contribution count</Text>
+        </View>
+
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>SYNC</Text>
+          <Text style={[styles.statValue, { fontSize: Typography.fontSizes.lg }]}>
+            {loadingLive ? 'LIVE...' : 'LIVE'}
+          </Text>
+          <Text style={styles.statHint}>Realtime updates enabled</Text>
+        </View>
+      </View>
+
       <View style={styles.filtersWrap}>
         <FlatList
           horizontal
@@ -200,46 +382,51 @@ export default function WallScreen() {
         />
       </View>
 
-      {/* Intro strip */}
       <View style={styles.infoStrip}>
         <View style={styles.infoDot} />
         <Text style={styles.infoText}>
-          Tap any poster to reopen the battle and see what people left on it.
+          This page updates from live mural data. Tap a poster to jump back into the battle room.
         </Text>
       </View>
 
-      {/* Grid */}
-      <View style={styles.gridWrap}>
-        <FlatList
-          data={filteredPosters}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          scrollEnabled={false}
-          columnWrapperStyle={styles.column}
-          contentContainerStyle={styles.gridContent}
-          renderItem={({ item, index }) => (
-            <WallPosterTile
-              poster={item}
-              index={index}
-              onPress={() => handleOpenPoster(item.id)}
-            />
-          )}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>NO WALLS HERE YET</Text>
-              <Text style={styles.emptyText}>
-                Scan your first poster and start building your archive.
-              </Text>
-              <TouchableOpacity
-                style={styles.emptyBtn}
-                onPress={() => router.push('/scanner')}
-              >
-                <Text style={styles.emptyBtnText}>SCAN A POSTER</Text>
-              </TouchableOpacity>
-            </View>
-          }
-        />
-      </View>
+      {loadingLive && rawPosters.length === 0 ? (
+        <View style={styles.loadingBlock}>
+          <ActivityIndicator color={Colors.accentPurple} size="large" />
+          <Text style={styles.loadingBlockText}>Loading wall intelligence...</Text>
+        </View>
+      ) : (
+        <View style={styles.gridWrap}>
+          <FlatList
+            data={filteredPosters}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            scrollEnabled={false}
+            columnWrapperStyle={styles.column}
+            contentContainerStyle={styles.gridContent}
+            renderItem={({ item, index }) => (
+              <WallPosterTile
+                poster={item}
+                index={index}
+                onPress={() => handleOpenPoster(item.id)}
+              />
+            )}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>NO WALLS HERE YET</Text>
+                <Text style={styles.emptyText}>
+                  Scan your first poster and start building your archive.
+                </Text>
+                <TouchableOpacity
+                  style={styles.emptyBtn}
+                  onPress={() => router.push('/scanner')}
+                >
+                  <Text style={styles.emptyBtnText}>SCAN A POSTER</Text>
+                </TouchableOpacity>
+              </View>
+            }
+          />
+        </View>
+      )}
 
       <View style={{ height: Spacing[8] }} />
     </ScreenContainer>
@@ -255,7 +442,7 @@ function WallPosterTile({
   index: number;
   onPress: () => void;
 }) {
-  const accent = TEAM_COLORS[poster.dominantTeam];
+  const accent = poster.dominantTeam ? TEAM_ACCENTS[poster.dominantTeam] : '#8A93A3';
   const rotated = index % 2 === 0 ? '-2deg' : '2deg';
 
   return (
@@ -275,7 +462,7 @@ function WallPosterTile({
       <View style={styles.tileTop}>
         <View style={[styles.statusPill, { borderColor: accent }]}>
           <Text style={[styles.statusPillText, { color: accent }]}>
-            {poster.isHot ? 'HOT WALL' : 'ARCHIVED'}
+            {poster.isHot ? 'HOT WALL' : 'LIVE ARCHIVE'}
           </Text>
         </View>
         <Text style={styles.tileTime}>{poster.lastActivityLabel}</Text>
@@ -304,7 +491,7 @@ function WallPosterTile({
         )}
 
         <View style={styles.layersPreview}>
-          <Text style={styles.layersPreviewText}>+{poster.layerCount} layers</Text>
+          <Text style={styles.layersPreviewText}>{poster.layerCount} layers</Text>
         </View>
       </View>
 
@@ -334,12 +521,12 @@ function WallPosterTile({
       <View style={styles.teamRow}>
         <View style={[styles.teamLine, { backgroundColor: accent }]} />
         <Text style={[styles.teamText, { color: accent }]}>
-          {poster.dominantTeam.toUpperCase()}
+          {poster.dominantTeam ? poster.dominantTeam.toUpperCase() : 'CONTESTED'}
         </Text>
       </View>
 
       <Text style={styles.tileFooter}>
-        Scanned {poster.scannedAtLabel}
+        Last active {poster.lastActivityLabel}
       </Text>
     </TouchableOpacity>
   );
@@ -485,6 +672,22 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 12,
     lineHeight: 18,
+  },
+
+  loadingBlock: {
+    marginHorizontal: Spacing[4],
+    marginTop: 20,
+    backgroundColor: '#0D0D10',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 24,
+    alignItems: 'center',
+    gap: 14,
+  },
+  loadingBlockText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.sm,
   },
 
   gridWrap: {

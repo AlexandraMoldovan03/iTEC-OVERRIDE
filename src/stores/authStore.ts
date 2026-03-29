@@ -24,6 +24,8 @@ interface AuthStore {
   ) => Promise<boolean>;
   logout: () => Promise<void>;
   restoreSession: () => Promise<void>;
+  /** Re-fetch score + posters_contributed from Supabase and update store. */
+  refreshUser: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -152,6 +154,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
         error: null,
       });
     }
+  },
+
+  refreshUser: async () => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return;
+    const updated = await authService.refreshProfile(userId);
+    if (updated) set({ user: updated });
   },
 
   clearError: () => set({ error: null }),
