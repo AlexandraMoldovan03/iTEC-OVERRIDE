@@ -131,13 +131,9 @@ function buildWallPoster(
 
   return {
     id: poster.id,
-    title: poster.title ?? poster.name ?? 'Untitled poster',
-    location:
-      poster.location?.label ??
-      poster.location?.address ??
-      poster.location?.name ??
-      'Unknown location',
-    thumbnail: poster.referenceImageUrl ?? poster.thumbnailUri ?? poster.thumbnail ?? undefined,
+    title: poster.name ?? 'Untitled poster',
+    location: poster.location?.label ?? 'Unknown location',
+    thumbnail: poster.referenceImageUrl ?? poster.thumbnailUri ?? undefined,
     scannedAtLabel: 'Unlocked',
     lastActivityLabel: timeAgoShort(lastActivityAt),
     layerCount,

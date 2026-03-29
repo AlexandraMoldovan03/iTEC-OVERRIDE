@@ -408,7 +408,6 @@ function BattleRoom({ id }: { id: string }) {
         await setAudioModeAsync({
           allowsRecording: false,
           playsInSilentMode: true,
-          shouldDuckAndroid: true,
         });
 
         const newPlayer = createAudioPlayer({ uri: usableUrl });
@@ -466,7 +465,6 @@ function BattleRoom({ id }: { id: string }) {
       await setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
-        shouldDuckAndroid: true,
       });
 
       if (!fileUri || durationMs < 400 || !user?.id || !user?.username) {

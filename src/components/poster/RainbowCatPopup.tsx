@@ -25,7 +25,8 @@ const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_SIZE = Math.min(SCREEN_W * 0.72, 300);
 
 interface Props {
-  source: object;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  source: any;
   onDone: () => void;
 }
 

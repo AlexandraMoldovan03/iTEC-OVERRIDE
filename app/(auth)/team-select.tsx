@@ -219,13 +219,15 @@ export default function TeamSelectScreen() {
         fullWidth
         style={[
           styles.joinBtn,
-          selectedTeam && {
-            backgroundColor: TEAM_COLORS[selectedTeam].primary,
-            borderColor:     TEAM_COLORS[selectedTeam].primary,
-            shadowColor:     TEAM_COLORS[selectedTeam].glow,
-            shadowOpacity:   0.7,
-            shadowRadius:    14,
-          },
+          selectedTeam
+            ? {
+                backgroundColor: TEAM_COLORS[selectedTeam].primary,
+                borderColor:     TEAM_COLORS[selectedTeam].primary,
+                shadowColor:     TEAM_COLORS[selectedTeam].glow,
+                shadowOpacity:   0.7,
+                shadowRadius:    14,
+              }
+            : undefined,
         ]}
       />
     </ScreenContainer>

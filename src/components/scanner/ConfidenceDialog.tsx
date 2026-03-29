@@ -4,7 +4,7 @@
  * Utilizatorul alege manual posterul corect sau retrage scanarea.
  */
 
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,6 @@ import {
   Modal,
   FlatList,
   Animated,
-  useRef,
-  useEffect,
 } from 'react-native';
 import { ScanCandidate } from '../../types/scan';
 import { Colors, Spacing, Radius, Typography } from '../../theme';
