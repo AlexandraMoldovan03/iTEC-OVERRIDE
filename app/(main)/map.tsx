@@ -1,148 +1,184 @@
 /**
  * app/(main)/map.tsx
- * Tactical world map / control board for poster territories.
+ * Floor treasure hunt map.
  *
- * Expo Go friendly:
- * - no native map dependency
- * - uses a stylized "radar / territory map" board
- * - deterministic node placement per poster
- * - node size/glow based on heat + activity
- * - selectable poster nodes with details panel
+ * Features:
+ * - real floor image background
+ * - 10 numbered hunt points
+ * - locked/unlocked state based on vaultStore.hasScanned(poster.id)
+ * - locked points show lock icon
+ * - unlocked points show check icon
+ * - selected point pulses
+ * - unlocked points open poster room
+ * - locked points redirect to scanner
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Image,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { posterService } from '../../src/services/posterService';
 import { Poster } from '../../src/types/poster';
+import { useVaultStore } from '../../src/stores/vaultStore';
+import { Colors, Spacing, Radius, Typography } from '../../src/theme';
 import { TeamBadge } from '../../src/components/ui/TeamBadge';
 import { HeatBar } from '../../src/components/ui/HeatBar';
 import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
-import { TEAM_COLORS } from '../../src/theme/colors';
-import { Colors, Spacing, Radius, Typography } from '../../src/theme';
 import { TeamId } from '../../src/types/team';
+import { TEAM_COLORS } from '../../src/theme/colors';
 import { timeAgo } from '../../src/utils/timeUtils';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+const FLOOR_MAP = require('../_layout/floorMap.png');
 
-type SortMode = 'heat' | 'recent' | 'name';
+type HuntPointLayout = {
+  slot: number;
+  x: number; // 0..1
+  y: number; // 0..1
+};
 
-const MAP_POINTS = [
-  { top: '18%', left: '14%' },
-  { top: '26%', left: '38%' },
-  { top: '20%', left: '64%' },
-  { top: '40%', left: '78%' },
-  { top: '52%', left: '58%' },
-  { top: '62%', left: '30%' },
-  { top: '72%', left: '70%' },
-  { top: '48%', left: '16%' },
-  { top: '34%', left: '54%' },
-  { top: '66%', left: '48%' },
+type HuntPoint = HuntPointLayout & {
+  poster: Poster;
+};
+
+const POINT_LAYOUTS: HuntPointLayout[] = [
+  { slot: 1, x: 0.16, y: 0.34 },
+  { slot: 2, x: 0.19, y: 0.76 },
+  { slot: 3, x: 0.35, y: 0.69 },
+  { slot: 4, x: 0.49, y: 0.70 },
+  { slot: 5, x: 0.67, y: 0.60 },
+  { slot: 6, x: 0.80, y: 0.73 },
+  { slot: 7, x: 0.78, y: 0.22 },
+  { slot: 8, x: 0.90, y: 0.42 },
+  { slot: 9, x: 0.77, y: 0.54 },
+  { slot: 10, x: 0.27, y: 0.53 },
 ];
 
-function hashString(input: string) {
-  let hash = 0;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
-  }
-  return hash;
+function formatSlot(slot: number) {
+  return slot.toString().padStart(2, '0');
 }
 
-function getPosterPosition(poster: Poster) {
-  const key = `${poster.id}-${poster.location?.label ?? poster.name}`;
-  const index = hashString(key) % MAP_POINTS.length;
-  return MAP_POINTS[index];
+function sortPostersForMap(posters: Poster[]) {
+  return [...posters].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function getPosterTeamColor(poster: Poster) {
-  if (!poster.territory.ownerTeamId) {
+function getTeamAccent(poster: Poster, unlocked: boolean) {
+  if (!unlocked) {
     return {
-      primary: Colors.textMuted,
-      glow: Colors.textMuted,
+      primary: '#555e6f',
+      border: '#8e98aa',
+      glow: '#555e6f',
+      text: '#dfe4ec',
     };
   }
-  return TEAM_COLORS[poster.territory.ownerTeamId as TeamId];
-}
 
-function getHeatValue(heat: string | number | undefined): number {
-  if (typeof heat === 'number') return heat;
-
-  switch (heat) {
-    case 'low':
-      return 0.3;
-    case 'medium':
-      return 0.6;
-    case 'high':
-      return 0.9;
-    default:
-      return 0.45;
+  if (!poster.territory.ownerTeamId) {
+    return {
+      primary: '#1fdc72',
+      border: '#98f4bc',
+      glow: '#1fdc72',
+      text: '#ffffff',
+    };
   }
+
+  const tc = TEAM_COLORS[poster.territory.ownerTeamId as TeamId];
+
+  return {
+    primary: tc.primary,
+    border: tc.primary,
+    glow: tc.glow ?? tc.primary,
+    text: '#ffffff',
+  };
 }
 
-function getNodeSize(heat: string | number | undefined) {
-  const h = getHeatValue(heat);
-  if (h >= 0.8) return 32;
-  if (h >= 0.55) return 26;
-  return 22;
-}
+function HuntNode({
+  point,
+  selected,
+  unlocked,
+  onPress,
+}: {
+  point: HuntPoint;
+  selected: boolean;
+  unlocked: boolean;
+  onPress: () => void;
+}) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  const accent = getTeamAccent(point.poster, unlocked);
 
-function getDominatedCount(posters: Poster[]) {
-  return posters.filter((p) => !!p.territory.ownerTeamId).length;
-}
+  useEffect(() => {
+    if (!selected) {
+      pulse.setValue(1);
+      return;
+    }
 
-function getHotCount(posters: Poster[]) {
-  return posters.filter((p) => getHeatValue(p.territory.heat) >= 0.8).length;
-}
-
-function getLatestPoster(posters: Poster[]) {
-  if (posters.length === 0) return null;
-  return [...posters].sort(
-    (a, b) =>
-      new Date(b.territory.lastActivityAt).getTime() -
-      new Date(a.territory.lastActivityAt).getTime()
-  )[0];
-}
-
-function sortPosters(posters: Poster[], mode: SortMode) {
-  const copy = [...posters];
-
-  if (mode === 'heat') {
-    return copy.sort(
-      (a, b) => getHeatValue(b.territory.heat) - getHeatValue(a.territory.heat)
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1.12,
+          duration: 650,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 650,
+          useNativeDriver: true,
+        }),
+      ])
     );
-  }
 
-  if (mode === 'recent') {
-    return copy.sort(
-      (a, b) =>
-        new Date(b.territory.lastActivityAt).getTime() -
-        new Date(a.territory.lastActivityAt).getTime()
-    );
-  }
+    loop.start();
+    return () => loop.stop();
+  }, [selected, pulse]);
 
-  return copy.sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <Animated.View
+      style={[
+        styles.nodeWrap,
+        {
+          left: `${point.x * 100}%`,
+          top: `${point.y * 100}%`,
+          transform: [{ scale: pulse }],
+        },
+      ]}
+    >
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.85}
+        style={[
+          styles.node,
+          {
+            backgroundColor: unlocked ? accent.primary : 'rgba(58, 64, 78, 0.96)',
+            borderColor: selected ? '#ffffff' : accent.border,
+            shadowColor: accent.glow,
+          },
+          unlocked && styles.nodeUnlocked,
+          selected && styles.nodeSelected,
+        ]}
+      >
+        <Text style={styles.nodeNumber}>{formatSlot(point.slot)}</Text>
+
+        <View style={styles.nodeIconWrap}>
+          <Text style={styles.nodeIcon}>{unlocked ? '✓' : '🔒'}</Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main screen
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function MapScreen() {
   const router = useRouter();
+  const vaultStore = useVaultStore();
 
   const [posters, setPosters] = useState<Poster[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPosterId, setSelectedPosterId] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>('heat');
 
   useEffect(() => {
     let mounted = true;
@@ -152,12 +188,14 @@ export default function MapScreen() {
         const data = await posterService.fetchAll();
         if (!mounted) return;
 
-        setPosters(data);
+        const firstTen = sortPostersForMap(data).slice(0, 10);
+        setPosters(firstTen);
 
-        if (data.length > 0) {
-          const hottest = sortPosters(data, 'heat')[0];
-          setSelectedPosterId(hottest?.id ?? null);
+        if (firstTen.length > 0) {
+          setSelectedPosterId(firstTen[0].id);
         }
+      } catch (err) {
+        console.warn('[map] failed to load posters', err);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -170,286 +208,230 @@ export default function MapScreen() {
     };
   }, []);
 
-  const sortedPosters = useMemo(() => sortPosters(posters, sortMode), [posters, sortMode]);
+  const huntPoints: HuntPoint[] = useMemo(() => {
+    return posters.slice(0, 10).map((poster, index) => ({
+      ...POINT_LAYOUTS[index],
+      poster,
+    }));
+  }, [posters]);
 
-  const selectedPoster =
-    posters.find((p) => p.id === selectedPosterId) ?? sortedPosters[0] ?? null;
+  const unlockedCount = useMemo(() => {
+    return huntPoints.filter((point) => vaultStore.hasScanned(point.poster.id)).length;
+  }, [huntPoints, vaultStore]);
 
-  const dominatedCount = useMemo(() => getDominatedCount(posters), [posters]);
-  const hotCount = useMemo(() => getHotCount(posters), [posters]);
-  const latestPoster = useMemo(() => getLatestPoster(posters), [posters]);
+  const selectedPoint =
+    huntPoints.find((point) => point.poster.id === selectedPosterId) ?? huntPoints[0] ?? null;
+
+  const selectedUnlocked = selectedPoint
+    ? vaultStore.hasScanned(selectedPoint.poster.id)
+    : false;
 
   return (
     <ScreenContainer scrollable padded={false}>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>TACTICAL NETWORK</Text>
-        <Text style={styles.title}>World Map</Text>
-        <Text style={styles.subtitle}>
-          Monitor active poster zones, hot territories and real-time ownership shifts.
-        </Text>
-      </View>
-
-      {/* Stats row */}
-      <View style={styles.statsRow}>
-        <StatCard label="TOTAL ZONES" value={String(posters.length)} />
-        <StatCard label="CLAIMED" value={String(dominatedCount)} />
-        <StatCard label="HOT" value={String(hotCount)} />
-      </View>
-
-      {/* Tactical board */}
-      <View style={styles.mapWrap}>
-        <View style={styles.mapHeaderRow}>
-          <View>
-            <Text style={styles.mapTitle}>TACTICAL GRID</Text>
-            <Text style={styles.mapSub}>
-              Select a node to inspect and enter its poster room.
-            </Text>
-          </View>
-
-          <View style={styles.legendWrap}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Colors.accentGreen }]} />
-              <Text style={styles.legendText}>live</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Colors.textMuted }]} />
-              <Text style={styles.legendText}>neutral</Text>
-            </View>
-          </View>
+      <View style={styles.screen}>
+        <View style={styles.header}>
+          <Text style={styles.eyebrow}>TREASURE HUNT</Text>
+          <Text style={styles.title}>Floor Map</Text>
+          <Text style={styles.subtitle}>
+            Find and scan the real posters to unlock all 10 points on the map.
+          </Text>
         </View>
 
-        <View style={styles.mapBoard}>
-          {/* Decorative grid */}
-          <View style={styles.gridOverlay}>
-            {Array.from({ length: 7 }).map((_, i) => (
-              <View key={`h-${i}`} style={[styles.gridLineH, { top: `${(i + 1) * 12}%` }]} />
-            ))}
-            {Array.from({ length: 5 }).map((_, i) => (
-              <View key={`v-${i}`} style={[styles.gridLineV, { left: `${(i + 1) * 16}%` }]} />
-            ))}
+        <View style={styles.progressCard}>
+          <View style={styles.progressTopRow}>
+            <Text style={styles.progressLabel}>HUNT PROGRESS</Text>
+            <Text style={styles.progressValue}>{unlockedCount} / 10</Text>
           </View>
 
-          {/* Radar rings */}
-          <View style={styles.ring1} />
-          <View style={styles.ring2} />
-          <View style={styles.ring3} />
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${(unlockedCount / 10) * 100}%` },
+              ]}
+            />
+          </View>
 
-          {/* Center marker */}
-          <View style={styles.centerCross} />
+          <Text style={styles.progressHint}>
+            Scan a poster in the real world to unlock its point here.
+          </Text>
+        </View>
 
-          {/* Loading */}
+        <View style={styles.mapWrap}>
+          <Image source={FLOOR_MAP} style={styles.mapImage} resizeMode="cover" />
+          <View style={styles.mapOverlayShade} />
+
           {loading && (
             <View style={styles.loadingOverlay}>
               <ActivityIndicator color={Colors.accentPurple} size="large" />
-              <Text style={styles.loadingMapText}>Scanning territories...</Text>
+              <Text style={styles.loadingText}>Loading hunt map...</Text>
             </View>
           )}
 
-          {/* Nodes */}
           {!loading &&
-            posters.map((poster) => {
-              const tc = getPosterTeamColor(poster);
-              const pos = getPosterPosition(poster);
-              const selected = selectedPosterId === poster.id;
-              const heatValue = getHeatValue(poster.territory.heat);
-              const size = getNodeSize(poster.territory.heat);
-              const isVeryHot = heatValue >= 0.8;
+            huntPoints.map((point) => {
+              const unlocked = vaultStore.hasScanned(point.poster.id);
+              const selected = selectedPosterId === point.poster.id;
 
               return (
-                <TouchableOpacity
-                  key={poster.id}
-                  style={[
-                    styles.mapNode,
-                    pos as any,
-                    {
-                      width: size,
-                      height: size,
-                      borderRadius: size / 2,
-                      borderColor: selected ? Colors.white : tc.primary,
-                      shadowColor: tc.glow ?? tc.primary,
-                    },
-                    selected && styles.mapNodeSelected,
-                    isVeryHot && styles.mapNodeHot,
-                  ]}
-                  onPress={() => setSelectedPosterId(poster.id)}
-                  activeOpacity={0.85}
-                >
-                  <View
-                    style={[
-                      styles.nodeCore,
-                      {
-                        backgroundColor: tc.primary,
-                        width: Math.max(8, size * 0.42),
-                        height: Math.max(8, size * 0.42),
-                        borderRadius: Math.max(4, size * 0.21),
-                      },
-                    ]}
-                  />
-                </TouchableOpacity>
+                <HuntNode
+                  key={point.poster.id}
+                  point={point}
+                  unlocked={unlocked}
+                  selected={selected}
+                  onPress={() => setSelectedPosterId(point.poster.id)}
+                />
               );
             })}
-        </View>
-      </View>
 
-      {/* Selected poster detail */}
-      {selectedPoster && (
-        <View style={styles.focusCard}>
-          <View style={styles.focusHeader}>
-            <View style={styles.focusTitleWrap}>
-              <Text style={styles.focusEyebrow}>SELECTED NODE</Text>
-              <Text style={styles.focusTitle}>{selectedPoster.name}</Text>
-              {selectedPoster.location && (
-                <Text style={styles.focusLocation}>📍 {selectedPoster.location.label}</Text>
+          {!loading && huntPoints.length === 0 && (
+            <View style={styles.emptyOverlay}>
+              <Text style={styles.emptyTitle}>No posters found</Text>
+              <Text style={styles.emptyText}>
+                Add at least 10 posters in your data source to build the treasure hunt.
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendSwatch, { backgroundColor: 'rgba(58, 64, 78, 0.96)' }]} />
+            <Text style={styles.legendText}>Locked</Text>
+          </View>
+
+          <View style={styles.legendItem}>
+            <View style={[styles.legendSwatch, { backgroundColor: '#1fdc72' }]} />
+            <Text style={styles.legendText}>Unlocked</Text>
+          </View>
+
+          <View style={styles.legendItem}>
+            <View
+              style={[
+                styles.legendSwatch,
+                {
+                  backgroundColor: '#1fdc72',
+                  borderWidth: 2,
+                  borderColor: '#ffffff',
+                },
+              ]}
+            />
+            <Text style={styles.legendText}>Selected</Text>
+          </View>
+        </View>
+
+        {selectedPoint && (
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <View style={styles.cardHeaderLeft}>
+                <Text style={styles.cardEyebrow}>POINT {formatSlot(selectedPoint.slot)}</Text>
+                <Text style={styles.cardTitle}>{selectedPoint.poster.name}</Text>
+
+                {selectedPoint.poster.location && (
+                  <Text style={styles.cardLocation}>
+                    📍 {selectedPoint.poster.location.label}
+                  </Text>
+                )}
+              </View>
+
+              {selectedUnlocked && selectedPoint.poster.territory.ownerTeamId ? (
+                <TeamBadge
+                  teamId={selectedPoint.poster.territory.ownerTeamId}
+                  size="sm"
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.statusBadge,
+                    selectedUnlocked ? styles.unlockedBadge : styles.lockedBadge,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      selectedUnlocked ? styles.unlockedBadgeText : styles.lockedBadgeText,
+                    ]}
+                  >
+                    {selectedUnlocked ? 'UNLOCKED' : 'LOCKED'}
+                  </Text>
+                </View>
               )}
             </View>
 
-            {selectedPoster.territory.ownerTeamId ? (
-              <TeamBadge teamId={selectedPoster.territory.ownerTeamId} size="sm" />
-            ) : (
-              <View style={styles.contestedBadge}>
-                <Text style={styles.contestedText}>CONTESTED</Text>
+            <View style={styles.metaRow}>
+              <View style={styles.metaBox}>
+                <Text style={styles.metaLabel}>Status</Text>
+                <Text style={styles.metaValue}>
+                  {selectedUnlocked ? 'Discovered' : 'Needs scan'}
+                </Text>
+              </View>
+
+              <View style={styles.metaBox}>
+                <Text style={styles.metaLabel}>Last activity</Text>
+                <Text style={styles.metaValue}>
+                  {timeAgo(selectedPoint.poster.territory.lastActivityAt)}
+                </Text>
+              </View>
+            </View>
+
+            <HeatBar
+              heat={selectedPoint.poster.territory.heat}
+              showLabel={false}
+              style={styles.heatBar}
+            />
+
+            <View style={styles.actionRow}>
+              {selectedUnlocked ? (
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  onPress={() => router.push(`/poster/${selectedPoint.poster.id}`)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>ENTER POSTER ROOM</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  onPress={() => router.push('/scanner')}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>SCAN TO UNLOCK</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => setSelectedPosterId(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.secondaryBtnText}>CLEAR</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!selectedUnlocked && (
+              <View style={styles.hintBox}>
+                <Text style={styles.hintText}>
+                  This point is still locked. Scan its real poster to unlock it on the treasure map.
+                </Text>
               </View>
             )}
           </View>
-
-          <View style={styles.focusMetaRow}>
-            <View style={styles.metaPill}>
-              <Text style={styles.metaPillLabel}>Last activity</Text>
-              <Text style={styles.metaPillValue}>
-                {timeAgo(selectedPoster.territory.lastActivityAt)}
-              </Text>
-            </View>
-
-            <View style={styles.metaPill}>
-              <Text style={styles.metaPillLabel}>Heat</Text>
-              <Text style={styles.metaPillValue}>
-                {typeof selectedPoster.territory.heat === 'string'
-                  ? selectedPoster.territory.heat.toUpperCase()
-                  : `${Math.round(getHeatValue(selectedPoster.territory.heat) * 100)}%`}
-              </Text>
-            </View>
-          </View>
-
-          <HeatBar
-            heat={selectedPoster.territory.heat}
-            showLabel={false}
-            style={styles.focusHeat}
-          />
-
-          <View style={styles.focusActions}>
-            <TouchableOpacity
-              style={styles.enterBtn}
-              onPress={() => router.push(`/poster/${selectedPoster.id}`)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.enterBtnText}>ENTER POSTER ROOM</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryBtn}
-              onPress={() => setSortMode((m) => (m === 'heat' ? 'recent' : m === 'recent' ? 'name' : 'heat'))}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.secondaryBtnText}>SORT: {sortMode.toUpperCase()}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Recent activity */}
-      {latestPoster && (
-        <View style={styles.activityStrip}>
-          <Text style={styles.activityLabel}>LATEST MOVEMENT</Text>
-          <Text style={styles.activityText}>
-            {latestPoster.name} updated {timeAgo(latestPoster.territory.lastActivityAt)}
-          </Text>
-        </View>
-      )}
-
-      {/* List */}
-      <View style={styles.listSection}>
-        <Text style={styles.listTitle}>ZONE DIRECTORY</Text>
-
-        {sortedPosters.map((p) => {
-          const selected = selectedPosterId === p.id;
-          const tc = getPosterTeamColor(p);
-
-          return (
-            <TouchableOpacity
-              key={p.id}
-              style={[
-                styles.listItem,
-                selected && styles.listItemSelected,
-              ]}
-              onPress={() => setSelectedPosterId(p.id)}
-              activeOpacity={0.85}
-            >
-              <View
-                style={[
-                  styles.listAccent,
-                  { backgroundColor: tc.primary },
-                ]}
-              />
-
-              <View style={styles.listItemLeft}>
-                <Text style={styles.listItemName}>{p.name}</Text>
-
-                {p.location && (
-                  <Text style={styles.listItemLoc}>📍 {p.location.label}</Text>
-                )}
-
-                <View style={styles.listItemRow}>
-                  {p.territory.ownerTeamId ? (
-                    <TeamBadge teamId={p.territory.ownerTeamId} size="sm" />
-                  ) : (
-                    <Text style={styles.neutralLabel}>CONTESTED</Text>
-                  )}
-                  <Text style={styles.listItemTime}>
-                    {timeAgo(p.territory.lastActivityAt)}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.listRight}>
-                <HeatBar heat={p.territory.heat} showLabel={false} style={styles.heatBar} />
-                <TouchableOpacity
-                  style={styles.miniEnterBtn}
-                  onPress={() => router.push(`/poster/${p.id}`)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.miniEnterBtnText}>OPEN</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+        )}
       </View>
     </ScreenContainer>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Small components
-// ─────────────────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.bg,
+    padding: Spacing[4],
+    paddingBottom: Spacing[8],
+  },
+
   header: {
-    paddingHorizontal: Spacing[4],
-    paddingTop: Spacing[6],
-    paddingBottom: Spacing[4],
+    marginBottom: Spacing[4],
     gap: Spacing[1],
   },
   eyebrow: {
@@ -459,166 +441,75 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.widest,
   },
   title: {
+    color: Colors.textPrimary,
     fontSize: Typography.fontSizes['2xl'],
     fontWeight: Typography.fontWeights.black,
-    color: Colors.textPrimary,
   },
   subtitle: {
-    fontSize: Typography.fontSizes.sm,
     color: Colors.textMuted,
+    fontSize: Typography.fontSizes.sm,
     lineHeight: 20,
     maxWidth: 340,
   },
 
-  statsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing[4],
-    gap: Spacing[3],
-    marginBottom: Spacing[5],
-  },
-  statCard: {
-    flex: 1,
+  progressCard: {
     backgroundColor: Colors.bgCard,
     borderRadius: Radius.xl,
     borderWidth: 1,
     borderColor: Colors.border,
-    paddingVertical: Spacing[3],
-    paddingHorizontal: Spacing[3],
+    padding: Spacing[4],
+    marginBottom: Spacing[4],
+    gap: Spacing[2],
+  },
+  progressTopRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
   },
-  statValue: {
-    color: Colors.textPrimary,
-    fontSize: Typography.fontSizes.xl,
-    fontWeight: Typography.fontWeights.black,
-  },
-  statLabel: {
+  progressLabel: {
     color: Colors.textMuted,
     fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.widest,
-    marginTop: 4,
   },
-
-  mapWrap: {
-    marginHorizontal: Spacing[4],
-    marginBottom: Spacing[5],
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-  },
-  mapHeaderRow: {
-    paddingHorizontal: Spacing[4],
-    paddingTop: Spacing[4],
-    paddingBottom: Spacing[3],
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: Spacing[3],
-  },
-  mapTitle: {
+  progressValue: {
     color: Colors.textPrimary,
     fontSize: Typography.fontSizes.base,
     fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.wide,
   },
-  mapSub: {
-    color: Colors.textMuted,
-    fontSize: Typography.fontSizes.xs,
-    marginTop: 4,
-  },
-  legendWrap: {
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  legendText: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-
-  mapBoard: {
-    height: 280,
-    position: 'relative',
-    overflow: 'hidden',
-    backgroundColor: '#0a0d12',
-  },
-  gridOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  gridLineH: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  gridLineV: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-
-  ring1: {
-    position: 'absolute',
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    top: '50%',
-    left: '50%',
-    marginTop: -45,
-    marginLeft: -45,
-  },
-  ring2: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    top: '50%',
-    left: '50%',
-    marginTop: -80,
-    marginLeft: -80,
-  },
-  ring3: {
-    position: 'absolute',
-    width: 230,
-    height: 230,
-    borderRadius: 115,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-    top: '50%',
-    left: '50%',
-    marginTop: -115,
-    marginLeft: -115,
-  },
-  centerCross: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 10,
+  progressTrack: {
     height: 10,
-    marginLeft: -5,
-    marginTop: -5,
-    borderRadius: 5,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgSurface,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: Radius.full,
+    backgroundColor: Colors.accentGreen,
+  },
+  progressHint: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.xs,
+  },
+
+  mapWrap: {
+    position: 'relative',
+    height: 470,
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: Spacing[3],
+  },
+  mapImage: {
+    width: '100%',
+    height: '100%',
+  },
+  mapOverlayShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(8, 10, 14, 0.12)',
   },
 
   loadingOverlay: {
@@ -626,40 +517,108 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing[3],
-    backgroundColor: 'rgba(5,6,8,0.45)',
+    backgroundColor: 'rgba(8, 10, 14, 0.35)',
   },
-  loadingMapText: {
-    color: Colors.textMuted,
+  loadingText: {
+    color: Colors.textPrimary,
     fontSize: Typography.fontSizes.sm,
-    letterSpacing: Typography.letterSpacing.wide,
+    fontWeight: Typography.fontWeights.semibold,
   },
 
-  mapNode: {
+  emptyOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing[6],
+    backgroundColor: 'rgba(8, 10, 14, 0.45)',
+  },
+  emptyTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSizes.lg,
+    fontWeight: Typography.fontWeights.black,
+    marginBottom: Spacing[2],
+  },
+  emptyText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  nodeWrap: {
     position: 'absolute',
+    marginLeft: -18,
+    marginTop: -18,
+  },
+  node: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
     shadowOpacity: 0.9,
     shadowRadius: 10,
-    elevation: 6,
-  },
-  mapNodeSelected: {
-    transform: [{ scale: 1.18 }],
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  mapNodeHot: {
-    shadowOpacity: 1,
-    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
     elevation: 8,
   },
-  nodeCore: {
-    opacity: 0.95,
+  nodeUnlocked: {
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  nodeSelected: {
+    borderWidth: 2.4,
+  },
+  nodeNumber: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  nodeIconWrap: {
+    position: 'absolute',
+    bottom: -8,
+    right: -8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#0f1319',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nodeIcon: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '900',
+    lineHeight: 12,
   },
 
-  focusCard: {
-    marginHorizontal: Spacing[4],
-    marginBottom: Spacing[4],
+  legend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing[4],
+    marginBottom: Spacing[3],
+    paddingHorizontal: Spacing[1],
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+  },
+  legendSwatch: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderColor: 'transparent',
+  },
+  legendText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.sm,
+  },
+
+  card: {
     backgroundColor: Colors.bgCard,
     borderRadius: Radius.xl,
     borderWidth: 1,
@@ -667,89 +626,102 @@ const styles = StyleSheet.create({
     padding: Spacing[4],
     gap: Spacing[3],
   },
-  focusHeader: {
+  cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: Spacing[3],
   },
-  focusTitleWrap: {
+  cardHeaderLeft: {
     flex: 1,
   },
-  focusEyebrow: {
+  cardEyebrow: {
     color: Colors.textMuted,
     fontSize: Typography.fontSizes.xs,
     fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.widest,
     marginBottom: 4,
   },
-  focusTitle: {
+  cardTitle: {
     color: Colors.textPrimary,
-    fontSize: Typography.fontSizes.lg,
+    fontSize: Typography.fontSizes.base,
     fontWeight: Typography.fontWeights.black,
   },
-  focusLocation: {
+  cardLocation: {
     color: Colors.textSecondary,
     fontSize: Typography.fontSizes.sm,
     marginTop: 4,
   },
-  contestedBadge: {
+
+  statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: Radius.full,
-    backgroundColor: Colors.bgSurface,
     borderWidth: 1,
-    borderColor: Colors.border,
   },
-  contestedText: {
-    color: Colors.warning,
+  lockedBadge: {
+    backgroundColor: 'rgba(70, 76, 88, 0.16)',
+    borderColor: '#70798a',
+  },
+  unlockedBadge: {
+    backgroundColor: 'rgba(31, 220, 114, 0.12)',
+    borderColor: '#1fdc72',
+  },
+  statusBadgeText: {
     fontSize: Typography.fontSizes.xs,
     fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.wide,
   },
+  lockedBadgeText: {
+    color: '#c3c9d4',
+  },
+  unlockedBadgeText: {
+    color: '#1fdc72',
+  },
 
-  focusMetaRow: {
+  metaRow: {
     flexDirection: 'row',
     gap: Spacing[3],
   },
-  metaPill: {
+  metaBox: {
     flex: 1,
     backgroundColor: Colors.bgSurface,
     borderRadius: Radius.lg,
-    paddingVertical: Spacing[2],
-    paddingHorizontal: Spacing[3],
     borderWidth: 1,
     borderColor: Colors.border,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3],
   },
-  metaPillLabel: {
+  metaLabel: {
     color: Colors.textMuted,
     fontSize: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.7,
     marginBottom: 4,
   },
-  metaPillValue: {
+  metaValue: {
     color: Colors.textPrimary,
     fontSize: Typography.fontSizes.sm,
     fontWeight: Typography.fontWeights.bold,
   },
-  focusHeat: {
+  heatBar: {
     marginTop: 2,
   },
-  focusActions: {
+
+  actionRow: {
     flexDirection: 'row',
     gap: Spacing[3],
   },
-  enterBtn: {
+  primaryBtn: {
     flex: 1,
     backgroundColor: Colors.accentPurple,
-    borderRadius: Radius.full,
     paddingVertical: Spacing[3],
+    borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  enterBtnText: {
-    color: Colors.white,
+  primaryBtnText: {
+    color: '#ffffff',
     fontSize: Typography.fontSizes.sm,
     fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.wide,
@@ -770,110 +742,16 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.wide,
   },
 
-  activityStrip: {
-    marginHorizontal: Spacing[4],
-    marginBottom: Spacing[4],
+  hintBox: {
     backgroundColor: Colors.bgSurface,
-    borderRadius: Radius.xl,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    paddingHorizontal: Spacing[4],
-    paddingVertical: Spacing[3],
-  },
-  activityLabel: {
-    color: Colors.accentGreen,
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.black,
-    letterSpacing: Typography.letterSpacing.widest,
-    marginBottom: 4,
-  },
-  activityText: {
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSizes.sm,
-  },
-
-  listSection: {
-    paddingHorizontal: Spacing[4],
-    paddingBottom: Spacing[8],
-  },
-  listTitle: {
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.bold,
-    color: Colors.textMuted,
-    letterSpacing: Typography.letterSpacing.widest,
-    marginBottom: Spacing[3],
-  },
-  listItem: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    marginBottom: Spacing[3],
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    overflow: 'hidden',
-  },
-  listItemSelected: {
-    borderColor: Colors.borderBright,
-  },
-  listAccent: {
-    width: 4,
-  },
-  listItemLeft: {
-    flex: 1,
-    padding: Spacing[4],
-    gap: Spacing[1],
-  },
-  listItemName: {
-    color: Colors.textPrimary,
-    fontSize: Typography.fontSizes.base,
-    fontWeight: Typography.fontWeights.semibold,
-  },
-  listItemLoc: {
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSizes.sm,
-  },
-  listItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing[2],
-    marginTop: Spacing[1],
-    flexWrap: 'wrap',
-  },
-  listItemTime: {
-    color: Colors.textMuted,
-    fontSize: Typography.fontSizes.xs,
-  },
-  neutralLabel: {
-    color: Colors.warning,
-    fontSize: Typography.fontSizes.xs,
-    fontWeight: Typography.fontWeights.bold,
-    letterSpacing: Typography.letterSpacing.wide,
-  },
-  listRight: {
-    width: 88,
     padding: Spacing[3],
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing[3],
-    borderLeftWidth: 1,
-    borderLeftColor: Colors.border,
   },
-  heatBar: {
-    width: 58,
-  },
-  miniEnterBtn: {
-    backgroundColor: Colors.bgSurface,
-    borderWidth: 1,
-    borderColor: Colors.borderBright,
-    borderRadius: Radius.full,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  miniEnterBtnText: {
-    color: Colors.textPrimary,
-    fontSize: 10,
-    fontWeight: Typography.fontWeights.black,
-    letterSpacing: 0.7,
+  hintText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.sm,
+    lineHeight: 20,
   },
 });
