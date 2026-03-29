@@ -16,7 +16,6 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useVaultStore } from '../../src/stores/vaultStore';
 import { ScreenContainer } from '../../src/components/ui/ScreenContainer';
-import { Button } from '../../src/components/ui/Button';
 import { TEAM_COLORS } from '../../src/theme/colors';
 import { Colors, Spacing, Radius, Typography } from '../../src/theme';
 import { TeamId } from '../../src/types/team';
@@ -26,7 +25,7 @@ import {
   OPEN_VAULT_IMAGE,
   SCAN_POSTER_IMAGE,
 } from '../../src/constants/badges';
-
+const LEAVE_ARENA_IMAGE = require('../_layout/LeaveArena.png');
 const TEAM_INITIALS: Record<string, string> = {
   minimalist: 'M', perfectionist: 'P', chaotic: 'C',
 };
@@ -165,15 +164,28 @@ export default function ProfileScreen() {
         )}
       </TouchableOpacity>
 
-      {/* ── Logout ───────────────────────────────────────── */}
-      <View style={styles.logoutWrap}>
-        <Button
-          label="Leave Arena"
-          onPress={handleLogout}
-          variant="danger"
-          fullWidth
-        />
-      </View>
+      {/* ── CTA imagine — LEAVE ARENA ────────────────────── */}
+      <TouchableOpacity
+      style={styles.imageBtn} // Keep your custom graffiti/image style
+      onPress={handleLogout}  // Change this from router.push to your logout function
+      activeOpacity={0.82}
+      >
+        {scanImgErr ? (
+          <View style={[styles.imageBtnFallback, { borderColor: '#FF1CF7' }]}>
+            <Text style={[styles.imageBtnFallbackText, { color: '#FF1CF7' }]}>📷  SCAN POSTER</Text>
+          </View>
+        ) : (
+          <Image
+            source={LEAVE_ARENA_IMAGE}
+            style={styles.imageBtnImg}
+            resizeMode="contain"
+            onError={() => setScanImgErr(true)}
+            fadeDuration={150}
+          />
+        )}
+      </TouchableOpacity>
+
+
 
     </ScreenContainer>
   );

@@ -31,6 +31,8 @@ export default function HomeScreen() {
   const [allPosters, setAllPosters] = useState<Poster[]>([]);
   const [postersLoading, setPostersLoading] = useState(true);
 
+  const OPEN_YOUR_WALL_IMAGE = require('../_layout/OpenYourWall.png'); 
+
   // Încarcă toate posterele disponibile din Supabase
   const fetchAll = useCallback(async () => {
     setPostersLoading(true);
@@ -120,7 +122,6 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
             teams compete with style, speed, and presence.
           </Text>
 
-          <View style={styles.heroActions}>
             <TouchableOpacity
               activeOpacity={0.88}
               style={styles.heroActionPrimary}
@@ -132,20 +133,24 @@ const hotCount = Math.max(0, Math.min(4, Math.floor(vaultPosters.length / 2)));
                 resizeMode="contain"
               />
             </TouchableOpacity>
+            <View style={styles.heroActions}>
+            <TouchableOpacity
+              activeOpacity={0.88}
+              style={styles.heroActionPrimary}
+              onPress={() => router.push('/scanner')}
+            >
+              <Image
+                source={OPEN_YOUR_WALL_IMAGE}
+                style={styles.heroActionImage}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
 
             <TouchableOpacity
               activeOpacity={0.88}
               style={styles.heroActionSecondary}
-              onPress={() => router.push('/(main)/wall')}
+              onPress={() => router.push('/(main)/vault')}
             >
-              <View style={styles.wallEntryCard}>
-                <Text style={styles.wallEntryEyebrow}>ARCHIVE MODE</Text>
-                <Text style={styles.wallEntryTitle}>OPEN YOUR WALL</Text>
-                <Text style={styles.wallEntryText}>
-                  See every scanned poster together with the layers and traces
-                  left by other players.
-                </Text>
-              </View>
             </TouchableOpacity>
           </View>
 
@@ -467,7 +472,7 @@ const styles = StyleSheet.create({
   },
   heroActionImage: {
     width: '100%',
-    height: 96,
+    height: 160,
   },
   wallEntryCard: {
     backgroundColor: 'rgba(11,11,15,0.92)',
