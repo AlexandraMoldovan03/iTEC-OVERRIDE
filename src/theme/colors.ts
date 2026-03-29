@@ -11,21 +11,21 @@ import { TeamId } from '../types/team';
 export const TEAM_COLORS: Record<TeamId, { primary: string; accent: string; glow: string; text: string }> = {
   minimalist: {
     primary: '#c5e0ff',
-    accent: '#c5e0ff',
-    glow: 'rgba(232,232,232,0.5)',
-    text: '#000000',
+    accent:  '#c5e0ff',
+    glow:    '#7EC8FF',   // electric ice-blue
+    text:    '#000000',
   },
   perfectionist: {
     primary: '#f87eb9',
-    accent: '#f87eb9',
-    glow: 'rgba(255, 105, 208, 0.55)',
-    text: '#000000',
+    accent:  '#f87eb9',
+    glow:    '#FF14C8',   // hot magenta-pink
+    text:    '#000000',
   },
   chaotic: {
     primary: '#38bd55',
-    accent: '#38bd55',
-    glow: 'rgba(88, 255, 107, 0.6)',
-    text: '#FFFFFF',
+    accent:  '#38bd55',
+    glow:    '#39FF14',   // neon green
+    text:    '#FFFFFF',
   },
 };
 

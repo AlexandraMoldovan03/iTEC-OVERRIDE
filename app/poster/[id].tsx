@@ -38,6 +38,7 @@ import { PosterAnchorView } from '../../src/components/poster/PosterAnchorView';
 import { TerritoryPanel } from '../../src/components/poster/TerritoryPanel';
 import { LeaderboardPanel } from '../../src/components/poster/LeaderboardPanel';
 import { LeaderAlert } from '../../src/components/poster/LeaderAlert';
+import { SwordBattleIntro } from '../../src/components/poster/SwordBattleIntro';
 import { MuralToolbar } from '../../src/components/mural/MuralToolbar';
 import { ColorPicker } from '../../src/components/mural/ColorPicker';
 import { StickerPicker } from '../../src/components/mural/StickerPicker';
@@ -52,8 +53,9 @@ import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
 
 // ─── Assets alertă ────────────────────────────────────────────────────────────
 
-const CAT_ALERT_1 = require('../_layout/cat1.png');
-const CAT_ALERT_2 = require('../_layout/cat2.png');
+const CAT_ALERT_1    = require('../_layout/cat1.png');
+const CAT_ALERT_2    = require('../_layout/cat2.png');
+const SWORD_BATTLE   = require('../_layout/Sword Battle.json');
 
 // ─── Avatar utilizator online ─────────────────────────────────────────────────
 
@@ -202,9 +204,10 @@ function BattleRoom({ id }: { id: string }) {
   const playerScores = usePosterStore((s) => s.playerScores);
   const teamScores = usePosterStore((s) => s.teamScores);
 
+  const [showIntro, setShowIntro]             = useState(true);
   const [showLostLeadAlert, setShowLostLeadAlert] = useState(false);
-  const [catVariant, setCatVariant] = useState<1 | 2>(1);
-  const [alertText, setAlertText] = useState('Someone just passed you and took 1st place.');
+  const [catVariant, setCatVariant]           = useState<1 | 2>(1);
+  const [alertText, setAlertText]             = useState('Someone just passed you and took 1st place.');
 
   const prevLeaderUserIdRef = useRef<string | null>(null);
   const prevLeaderTeamIdRef = useRef<string | null>(null);
@@ -310,6 +313,14 @@ function BattleRoom({ id }: { id: string }) {
 
   return (
     <View style={styles.screen}>
+      {/* ── Intro animație sword battle — joacă o singură dată la intrare ── */}
+      {showIntro && (
+        <SwordBattleIntro
+          source={SWORD_BATTLE}
+          onDone={() => setShowIntro(false)}
+        />
+      )}
+
       <LeaderAlert
         visible={showLostLeadAlert}
         imageSource={catVariant === 1 ? CAT_ALERT_1 : CAT_ALERT_2}

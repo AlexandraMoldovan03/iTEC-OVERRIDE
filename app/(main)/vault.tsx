@@ -17,7 +17,7 @@ import React, {
 import {
   Animated, Dimensions, Image, PanResponder,
   StyleSheet, Text, TouchableOpacity, View,
-  ActivityIndicator, Platform,
+  ActivityIndicator, Platform, Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -34,6 +34,7 @@ import { TEAM_COLORS }   from '../../src/theme/colors';
 import { PosterLayerItem, BrushStrokeItem, StickerItem, TeamStampItem } from '../../src/types/mural';
 import { TeamId }        from '../../src/types/team';
 import { posterService } from '../../src/services/posterService';
+import { ARPreviewModal } from '../../src/components/poster/ARPreviewModal';
 
 // ─── Canvas constants ─────────────────────────────────────────────────────────
 
@@ -159,7 +160,7 @@ const TileMuralOverlay = React.memo(function TileMuralOverlay({ layers }: Overla
           const pathD  = toPath(stroke.points);
           if (!pathD) return null;
           const isGlow    = d.type === 'glow';
-          const glowW     = (stroke.strokeWidth + (isGlow ? 8 : 4)) * STROKE_SCALE;
+          const glowW     = (stroke.strokeWidth + (isGlow ? 12 : 7)) * STROKE_SCALE;
           const strokeW   = Math.max(0.8, stroke.strokeWidth * STROKE_SCALE);
           return (
             <G key={item.id}>
@@ -170,7 +171,7 @@ const TileMuralOverlay = React.memo(function TileMuralOverlay({ layers }: Overla
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 fill="none"
-                opacity={0.35}
+                opacity={isGlow ? 0.75 : 0.62}
               />
               <Path
                 d={pathD}
@@ -415,6 +416,7 @@ const PosterTile = React.memo(function PosterTile({
           <Text style={styles.badgeText}>{layerCount > 99 ? '99+' : layerCount}</Text>
         </Animated.View>
       )}
+
     </Animated.View>
   );
 });
@@ -427,10 +429,12 @@ export default function VaultScreen() {
   const user   = useAuthStore((s) => s.user);
   const { posters, isLoading, loadVault } = useVaultStore();
 
-  const [positions, setPositions]     = useState<Record<string, { x: number; y: number }>>({});
-  const [layerCounts, setLayerCounts] = useState<Record<string, number>>({});
-  const [layersMap, setLayersMap]     = useState<Record<string, PosterLayerItem[]>>({});
-  const [posReady, setPosReady]       = useState(false);
+  const [positions, setPositions]         = useState<Record<string, { x: number; y: number }>>({});
+  const [layerCounts, setLayerCounts]     = useState<Record<string, number>>({});
+  const [layersMap, setLayersMap]         = useState<Record<string, PosterLayerItem[]>>({});
+  const [posReady, setPosReady]           = useState(false);
+  const [selectedPosterId, setSelected]   = useState<string | null>(null);   // bottom sheet
+  const [arPosterId, setArPosterId]       = useState<string | null>(null);   // AR camera
 
   // ── Animated values ───────────────────────────────────────────────────────
 
@@ -555,8 +559,8 @@ export default function VaultScreen() {
   );
 
   const handleTap = useCallback(
-    (id: string) => { router.push(`/poster/${id}`); },
-    [router],
+    (id: string) => { setSelected(id); },
+    [],
   );
 
   // ── Canvas PanResponder ───────────────────────────────────────────────────
@@ -654,7 +658,7 @@ export default function VaultScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
         <View style={styles.headerRow} pointerEvents="none">
           <View>
-            <Text style={styles.headerTitle}>YOUR WALL</Text>
+            <Text style={styles.headerTitle}>VAULT</Text>
             <Text style={styles.headerSub}>
               {posters.length} poster{posters.length !== 1 ? 's' : ''}
               {'  •  hold a poster to move it'}
@@ -672,6 +676,78 @@ export default function VaultScreen() {
         <MaterialCommunityIcons name="scan-helper" size={20} color="#000" />
         <Text style={styles.fabTxt}>SCAN</Text>
       </TouchableOpacity>
+
+      {/* ── Poster action bottom sheet ── */}
+      <Modal
+        visible={!!selectedPosterId}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setSelected(null)}
+      >
+        <TouchableOpacity
+          style={styles.sheetBackdrop}
+          activeOpacity={1}
+          onPress={() => setSelected(null)}
+        />
+        {(() => {
+          const sel = posters.find((p) => p.id === selectedPosterId);
+          if (!sel) return null;
+          const tc = sel.territory?.ownerTeamId
+            ? TEAM_COLORS[sel.territory.ownerTeamId]?.primary
+            : null;
+          return (
+            <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
+              {/* Drag handle */}
+              <View style={styles.sheetHandle} />
+
+              {/* Poster name + team dot */}
+              <View style={styles.sheetHeader}>
+                {tc && <View style={[styles.sheetTeamDot, { backgroundColor: tc }]} />}
+                <Text style={styles.sheetTitle} numberOfLines={1}>{sel.name}</Text>
+              </View>
+
+              {/* Action buttons */}
+              <TouchableOpacity
+                style={styles.sheetBtn}
+                activeOpacity={0.82}
+                onPress={() => {
+                  setSelected(null);
+                  router.push(`/poster/${sel.id}`);
+                }}
+              >
+                <MaterialCommunityIcons name="sword-cross" size={20} color="#000" />
+                <Text style={styles.sheetBtnText}>ENTER BATTLE ROOM</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.sheetBtn, styles.sheetBtnAR]}
+                activeOpacity={0.82}
+                onPress={() => {
+                  setSelected(null);
+                  setArPosterId(sel.id);
+                }}
+              >
+                <MaterialCommunityIcons name="augmented-reality" size={20} color="#00E5FF" />
+                <Text style={[styles.sheetBtnText, { color: '#00E5FF' }]}>AR PREVIEW</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })()}
+      </Modal>
+
+      {/* ── AR Preview Modal ── */}
+      {arPosterId && (() => {
+        const arPoster = posters.find((p) => p.id === arPosterId);
+        return (
+          <ARPreviewModal
+            visible={true}
+            posterName={arPoster?.name ?? ''}
+            layers={layersMap[arPosterId] ?? []}
+            onClose={() => setArPosterId(null)}
+          />
+        );
+      })()}
 
     </View>
   );
@@ -742,6 +818,73 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   teamDot: { width: 7, height: 7, borderRadius: 999 },
+
+  // ── Bottom sheet ──────────────────────────────────────────────────────────
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  sheet: {
+    position:          'absolute',
+    bottom:            0,
+    left:              0,
+    right:             0,
+    backgroundColor:   '#111115',
+    borderTopLeftRadius:  22,
+    borderTopRightRadius: 22,
+    borderTopWidth:    1,
+    borderColor:       'rgba(255,255,255,0.1)',
+    paddingHorizontal: 20,
+    paddingTop:        12,
+    gap:               10,
+  },
+  sheetHandle: {
+    alignSelf:       'center',
+    width:           40,
+    height:          4,
+    borderRadius:    2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginBottom:    8,
+  },
+  sheetHeader: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    gap:            8,
+    marginBottom:   4,
+  },
+  sheetTeamDot: {
+    width:        10,
+    height:       10,
+    borderRadius: 999,
+  },
+  sheetTitle: {
+    color:         '#fff',
+    fontSize:      16,
+    fontWeight:    '800',
+    letterSpacing: 0.4,
+    flex:          1,
+  },
+  sheetBtn: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    justifyContent:    'center',
+    gap:               10,
+    backgroundColor:   '#00E5FF',
+    borderRadius:      14,
+    paddingVertical:   15,
+    paddingHorizontal: 20,
+  },
+  sheetBtnAR: {
+    backgroundColor: 'rgba(0,229,255,0.08)',
+    borderWidth:     1.5,
+    borderColor:     '#00E5FF',
+  },
+  sheetBtnText: {
+    color:         '#000',
+    fontSize:      14,
+    fontWeight:    '900',
+    letterSpacing: 1.1,
+  },
 
   badge: {
     position:          'absolute',

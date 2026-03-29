@@ -150,13 +150,19 @@ export function useHaptics() {
     },
 
     /**
-     * Un inamic a început să deseneze pe același poster.
-     * Dublu impact mediu — alert scurt și clar.
+     * Un coechipier desenează activ pe același poster.
+     * Impact light — percep că cineva lucrează alături, non-intruziv.
      */
-    async enemyDrawing() {
-      await safeImpact('medium');
-      await delay(80);
-      await safeImpact('medium');
+    allyDrawing() {
+      safeImpact('light');
+    },
+
+    /**
+     * Un inamic desenează activ pe același poster.
+     * Impact medium — mai pronunțat, simți "amenințarea".
+     */
+    enemyDrawing() {
+      safeImpact('medium');
     },
   };
 }

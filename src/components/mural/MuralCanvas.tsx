@@ -44,26 +44,58 @@ export function MuralCanvas({
   const currentUser   = useAuthStore((s) => s.user);
   const haptics       = useHaptics();
 
-  // ── Detectează inamic care începe să deseneze ─────────────
-  // Când apare un strokeId nou în remoteStrokes de la o echipă diferită,
-  // declanșăm vibratia haptic enemyDrawing().
-  const knownStrokeIds = useRef<Set<string>>(new Set());
+  // ── Haptic în timp real cât timp alții desenează ──────────
+  // Urmărim creșterea numărului de puncte per stroke (= deget care se mișcă).
+  // Light haptic pentru coechipieri, medium pentru inamici.
+  // Throttle 160ms ca să nu spameze la fiecare frame de mișcare.
+
+  const strokePointCounts = useRef<Map<string, number>>(new Map());
+  const knownStrokeIds    = useRef<Set<string>>(new Set());
+  const lastHapticMs      = useRef<number>(0);
+  const HAPTIC_INTERVAL   = 160; // ms
 
   useEffect(() => {
-    const currentIds = Object.keys(remoteStrokes);
+    const now        = Date.now();
+    const currentIds = new Set(Object.keys(remoteStrokes));
+    let hasActivity  = false;
+    let hasEnemy     = false;
 
     currentIds.forEach((sid) => {
-      if (!knownStrokeIds.current.has(sid)) {
-        // Stroke nou — verifică dacă e inamic (echipă diferită)
-        const stroke = remoteStrokes[sid];
-        if (stroke && currentUser?.teamId && stroke.teamId !== currentUser.teamId) {
-          haptics.enemyDrawing();
+      const stroke = remoteStrokes[sid];
+      if (!stroke) return;
+      if (stroke.userId === currentUser?.id) return; // ignoră propriul stroke
+
+      const prevCount = strokePointCounts.current.get(sid) ?? -1;
+      const currCount = stroke.points.length;
+
+      if (currCount > prevCount) {
+        // Puncte noi → degetul se mișcă activ
+        hasActivity = true;
+        if (currentUser?.teamId && stroke.teamId !== currentUser.teamId) {
+          hasEnemy = true;
         }
       }
+
+      strokePointCounts.current.set(sid, currCount);
     });
 
-    // Actualizează set-ul cu ID-urile active
-    knownStrokeIds.current = new Set(currentIds);
+    // Curăță tracking-ul stroke-urilor terminate
+    knownStrokeIds.current.forEach((sid) => {
+      if (!currentIds.has(sid)) {
+        strokePointCounts.current.delete(sid);
+      }
+    });
+    knownStrokeIds.current = currentIds;
+
+    // Declanșează haptic dacă a trecut destul timp de la ultimul
+    if (hasActivity && now - lastHapticMs.current >= HAPTIC_INTERVAL) {
+      lastHapticMs.current = now;
+      if (hasEnemy) {
+        haptics.enemyDrawing(); // medium — simți inamicul
+      } else {
+        haptics.allyDrawing();  // light — simți coechipierul
+      }
+    }
   }, [remoteStrokes]);
 
   const { activeStroke, onTouchStart, onTouchMove, onTouchEnd } = useMuralCanvas({
@@ -104,15 +136,29 @@ export function MuralCanvas({
       const isGlow = d.type === 'glow';
       return (
         <G key={item.id}>
+          {/* Bloom exterior — strat larg, vizibil mai ales la tool glow */}
+          {isGlow && (
+            <Path
+              d={pathD}
+              stroke={teamColor.glow}
+              strokeWidth={stroke.strokeWidth + 22}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+              opacity={0.22}
+            />
+          )}
+          {/* Glow halo principal — culoarea echipei */}
           <Path
             d={pathD}
             stroke={teamColor.glow}
-            strokeWidth={stroke.strokeWidth + (isGlow ? 8 : 4)}
+            strokeWidth={stroke.strokeWidth + (isGlow ? 12 : 7)}
             strokeLinecap="round"
             strokeLinejoin="round"
             fill="none"
-            opacity={0.5}
+            opacity={isGlow ? 0.85 : 0.72}
           />
+          {/* Linia de desen propriu-zisă */}
           <Path
             d={pathD}
             stroke={stroke.color}
@@ -220,15 +266,27 @@ export function MuralCanvas({
 
     return (
       <G key={rs.strokeId}>
-        {/* Glow echipă — identitate vizuală clară */}
+        {/* Bloom exterior (doar la glow tool) */}
+        {isGlow && (
+          <Path
+            d={pathD}
+            stroke={teamColor.glow}
+            strokeWidth={rs.strokeWidth + 24}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+            opacity={0.2}
+          />
+        )}
+        {/* Glow halo principal */}
         <Path
           d={pathD}
           stroke={teamColor.glow}
-          strokeWidth={rs.strokeWidth + (isGlow ? 10 : 5)}
+          strokeWidth={rs.strokeWidth + (isGlow ? 14 : 8)}
           strokeLinecap="round"
           strokeLinejoin="round"
           fill="none"
-          opacity={0.45}
+          opacity={isGlow ? 0.88 : 0.75}
         />
         {/* Linia principală */}
         <Path
