@@ -12,7 +12,7 @@
  * Posterul este scalat fit-to-width păstrând aspect ratio-ul fizic (mm).
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -20,6 +20,7 @@ import {
   Image,
   ActivityIndicator,
   Text,
+  Animated,
 } from 'react-native';
 import { Poster } from '../../types/poster';
 import { PosterLayerItem } from '../../types/mural';
@@ -30,6 +31,8 @@ import { Colors, Spacing, Radius, Typography } from '../../theme';
 interface PosterAnchorViewProps {
   poster: Poster;
   layers: PosterLayerItem[];
+  /** Pornește un micro-glitch (tremur + flicker) pe afișaj */
+  glitching?: boolean;
 }
 
 // ─── Placeholder când nu există referenceImageUrl ─────────────────────────────
@@ -86,7 +89,7 @@ function PosterPlaceholder({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function PosterAnchorView({ poster, layers }: PosterAnchorViewProps) {
+export function PosterAnchorView({ poster, layers, glitching }: PosterAnchorViewProps) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   // Rezervă spațiu pentru HUD top + toolbar bottom
   const availableH = screenH * 0.55;
@@ -98,14 +101,76 @@ export function PosterAnchorView({ poster, layers }: PosterAnchorViewProps) {
 
   const hasImage = !!poster.referenceImageUrl && !imgError;
 
+  // ── Glitch animation values ──────────────────────────────────────────────
+  const shakeX       = useRef(new Animated.Value(0)).current;
+  const shakeY       = useRef(new Animated.Value(0)).current;
+  const posterOp     = useRef(new Animated.Value(1)).current;
+  const glitchFlash  = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!glitching) return;
+
+    // Reset la start
+    shakeX.setValue(0);
+    shakeY.setValue(0);
+    posterOp.setValue(1);
+    glitchFlash.setValue(0);
+
+    const dur = (ms: number) => ({ duration: ms, useNativeDriver: true as const });
+
+    Animated.parallel([
+      // Tremurat orizontal rapid — efectul principal de glitch
+      Animated.sequence([
+        Animated.timing(shakeX, { toValue: -7,  ...dur(40) }),
+        Animated.timing(shakeX, { toValue:  9,  ...dur(35) }),
+        Animated.timing(shakeX, { toValue: -6,  ...dur(40) }),
+        Animated.timing(shakeX, { toValue:  8,  ...dur(30) }),
+        Animated.timing(shakeX, { toValue: -4,  ...dur(45) }),
+        Animated.timing(shakeX, { toValue:  5,  ...dur(35) }),
+        Animated.timing(shakeX, { toValue: -2,  ...dur(50) }),
+        Animated.timing(shakeX, { toValue:  2,  ...dur(40) }),
+        Animated.timing(shakeX, { toValue:  0,  ...dur(90) }),
+      ]),
+      // Tremurat vertical mai subtil
+      Animated.sequence([
+        Animated.timing(shakeY, { toValue: -3, ...dur(55) }),
+        Animated.timing(shakeY, { toValue:  4, ...dur(45) }),
+        Animated.timing(shakeY, { toValue: -2, ...dur(55) }),
+        Animated.timing(shakeY, { toValue:  3, ...dur(45) }),
+        Animated.timing(shakeY, { toValue:  0, ...dur(90) }),
+      ]),
+      // Flicker opacitate — ca un bec care pâlpâie
+      Animated.sequence([
+        Animated.timing(posterOp, { toValue: 0.55, ...dur(35) }),
+        Animated.timing(posterOp, { toValue: 1,    ...dur(25) }),
+        Animated.timing(posterOp, { toValue: 0.75, ...dur(40) }),
+        Animated.timing(posterOp, { toValue: 1,    ...dur(20) }),
+        Animated.timing(posterOp, { toValue: 0.65, ...dur(35) }),
+        Animated.timing(posterOp, { toValue: 1,    ...dur(25) }),
+        Animated.timing(posterOp, { toValue: 0.85, ...dur(40) }),
+        Animated.timing(posterOp, { toValue: 1,    ...dur(70) }),
+      ]),
+      // Flash colorat roșu — ca un semnal de pericol
+      Animated.sequence([
+        Animated.timing(glitchFlash, { toValue: 0.40, ...dur(35) }),
+        Animated.timing(glitchFlash, { toValue: 0,    ...dur(25) }),
+        Animated.timing(glitchFlash, { toValue: 0.28, ...dur(40) }),
+        Animated.timing(glitchFlash, { toValue: 0,    ...dur(30) }),
+        Animated.timing(glitchFlash, { toValue: 0.18, ...dur(45) }),
+        Animated.timing(glitchFlash, { toValue: 0,    ...dur(90) }),
+      ]),
+    ]).start();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [glitching]);
+
   return (
     <View style={[styles.frame, { width: screenW, height: availableH }]}>
 
       {/* ── Fundal negru (vizibil în marginile din jurul posterului) ── */}
       <View style={styles.outerBg} />
 
-      {/* ── Zona posterului ────────────────────────────────────────── */}
-      <View
+      {/* ── Zona posterului — învelită în Animated.View pentru glitch ── */}
+      <Animated.View
         style={[
           styles.posterArea,
           {
@@ -113,6 +178,8 @@ export function PosterAnchorView({ poster, layers }: PosterAnchorViewProps) {
             top:    rect.y,
             width:  rect.width,
             height: rect.height,
+            opacity:   posterOp,
+            transform: [{ translateX: shakeX }, { translateY: shakeY }],
           },
         ]}
       >
@@ -161,7 +228,13 @@ export function PosterAnchorView({ poster, layers }: PosterAnchorViewProps) {
         <View style={[styles.corner, styles.tr]} pointerEvents="none" />
         <View style={[styles.corner, styles.bl]} pointerEvents="none" />
         <View style={[styles.corner, styles.br]} pointerEvents="none" />
-      </View>
+
+        {/* ── 5. Glitch flash overlay (roșu pericol) ─────────────── */}
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.glitchOverlay, { opacity: glitchFlash }]}
+        />
+      </Animated.View>
     </View>
   );
 }
@@ -223,6 +296,12 @@ const styles = StyleSheet.create({
   tr: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 2 },
   bl: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 2 },
   br: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 2 },
+
+  // ── Glitch overlay ───────────────────────────────────────────
+  glitchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#ff1a3a',   // roșu intens — semnal de pierdere lead
+  },
 
   // ── Placeholder ──────────────────────────────────────────────
   placeholder: {

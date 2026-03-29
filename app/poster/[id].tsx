@@ -2,12 +2,17 @@
  * app/poster/[id].tsx
  * Camera poster — arena de battle live.
  *
- * Added:
+ * Features:
  * - live voice notes per poster room
  * - hold-to-record / release-to-send
  * - upload to Supabase Storage
  * - realtime sync from voice_messages
- * - vertical scroll for poster content
+ * - poster stays fixed (no scroll over drawing area)
+ * - lower content is scrollable
+ * - autoplay for incoming voice notes
+ * - sender does NOT auto-hear own voice note
+ * - live pulse messages (vibration patterns) per poster room
+ * - pulse is broadcast to ALL other users on the same poster
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -45,6 +50,7 @@ import { TerritoryPanel } from '../../src/components/poster/TerritoryPanel';
 import { LeaderboardPanel } from '../../src/components/poster/LeaderboardPanel';
 import { LeaderAlert } from '../../src/components/poster/LeaderAlert';
 import { SwordBattleIntro } from '../../src/components/poster/SwordBattleIntro';
+import { RainbowCatPopup } from '../../src/components/poster/RainbowCatPopup';
 import { MuralToolbar } from '../../src/components/mural/MuralToolbar';
 import { ColorPicker } from '../../src/components/mural/ColorPicker';
 import { StickerPicker } from '../../src/components/mural/StickerPicker';
@@ -57,19 +63,14 @@ import { TeamId } from '../../src/types/team';
 import { OnlineUser } from '../../src/services/wsService';
 import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
 
-// ─── Assets ───────────────────────────────────────────────────────────────────
-
 const CAT_ALERT_1 = require('../_layout/cat1.png');
 const CAT_ALERT_2 = require('../_layout/cat2.png');
 const SWORD_BATTLE = require('../_layout/Sword Battle.json');
-
-// ─── Voice constants ──────────────────────────────────────────────────────────
+const BLACK_RAINBOW_CAT = require('../_layout/black rainbow cat.json');
 
 const VOICE_BUCKET = 'poster-voice';
 const MAX_VOICE_SECONDS = 15;
-const TOOLBAR_BOTTOM_SPACE = 120;
-
-// ─── Voice types/helpers ──────────────────────────────────────────────────────
+const TOOLBAR_BOTTOM_SPACE = 140;
 
 type VoiceMessage = {
   id: string;
@@ -82,40 +83,39 @@ type VoiceMessage = {
   signed_url?: string | null;
 };
 
-function formatVoiceDuration(ms: number) {
-  const totalSec = Math.max(1, Math.round(ms / 1000));
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  return `${min}:${sec.toString().padStart(2, '0')}`;
+type VibrationMessage = {
+  id: string;
+  poster_id: string;
+  sender_id: string;
+  sender_username: string;
+  pattern: number[];
+  total_duration_ms: number;
+  created_at: string;
+};
+
+function clamp(num: number, min: number, max: number) {
+  return Math.max(min, Math.min(num, max));
 }
 
-async function buildSignedVoiceUrl(storagePath: string) {
-  const { data, error } = await supabase.storage
+function buildSignedVoiceUrl(storagePath: string) {
+  return supabase.storage
     .from(VOICE_BUCKET)
-    .createSignedUrl(storagePath, 60 * 60);
-
-  if (error) return null;
-  return data?.signedUrl ?? null;
+    .createSignedUrl(storagePath, 60 * 60)
+    .then(({ data, error }) => (error ? null : (data?.signedUrl ?? null)));
 }
 
-async function fetchVoiceMessagesForPoster(posterId: string): Promise<VoiceMessage[]> {
-  const { data, error } = await supabase
-    .from('voice_messages')
-    .select('*')
-    .eq('poster_id', posterId)
-    .order('created_at', { ascending: false })
-    .limit(20);
+function buildPulsePatternFromHold(durationMs: number): number[] {
+  const safeDuration = clamp(durationMs, 250, 5000);
+  const chunkCount = clamp(Math.round(safeDuration / 180), 3, 18);
+  const pattern: number[] = [0];
 
-  if (error || !data) return [];
+  for (let i = 0; i < chunkCount; i += 1) {
+    const vib = 50 + ((i * 37) % 90);
+    const pause = 35 + ((i * 19) % 70);
+    pattern.push(vib, pause);
+  }
 
-  const withUrls = await Promise.all(
-    data.map(async (row) => ({
-      ...row,
-      signed_url: await buildSignedVoiceUrl(row.storage_path),
-    }))
-  );
-
-  return withUrls;
+  return pattern;
 }
 
 async function uploadVoiceMessage(params: {
@@ -156,7 +156,26 @@ async function uploadVoiceMessage(params: {
   if (insertError) throw insertError;
 }
 
-// ─── Avatar utilizator online ─────────────────────────────────────────────────
+async function insertVibrationMessage(params: {
+  posterId: string;
+  senderId: string;
+  senderUsername: string;
+  pattern: number[];
+}) {
+  const totalDurationMs = params.pattern.reduce((sum, val) => sum + val, 0);
+
+  const { error } = await supabase
+    .from('vibration_messages')
+    .insert({
+      poster_id: params.posterId,
+      sender_id: params.senderId,
+      sender_username: params.senderUsername,
+      pattern: params.pattern,
+      total_duration_ms: totalDurationMs,
+    });
+
+  if (error) throw error;
+}
 
 const TEAM_INITIALS: Record<string, string> = {
   minimalist: 'M',
@@ -197,8 +216,6 @@ function UserAvatar({ user }: { user: OnlineUser }) {
   );
 }
 
-// ─── Scan gate screen ─────────────────────────────────────────────────────────
-
 function ScanGateScreen({ onScan, onBack }: { onScan: () => void; onBack: () => void }) {
   return (
     <View style={styles.gateScreen}>
@@ -212,11 +229,7 @@ function ScanGateScreen({ onScan, onBack }: { onScan: () => void; onBack: () => 
         <Text style={styles.gateDesc}>
           Find the real-world poster and scan it with your camera to enter this battle room.
         </Text>
-        <Button
-          label="Open Scanner"
-          onPress={onScan}
-          style={styles.gateBtn}
-        />
+        <Button label="Open Scanner" onPress={onScan} style={styles.gateBtn} />
         <TouchableOpacity onPress={onBack} style={styles.gateCancel}>
           <Text style={styles.gateCancelText}>Not now</Text>
         </TouchableOpacity>
@@ -224,8 +237,6 @@ function ScanGateScreen({ onScan, onBack }: { onScan: () => void; onBack: () => 
     </View>
   );
 }
-
-// ─── Ecran principal ──────────────────────────────────────────────────────────
 
 type GateState = 'checking' | 'granted' | 'denied';
 
@@ -282,8 +293,6 @@ export default function PosterRoomScreen() {
   return <BattleRoom id={id} />;
 }
 
-// ─── Battle room ──────────────────────────────────────────────────────────────
-
 function BattleRoom({ id }: { id: string }) {
   const router = useRouter();
 
@@ -308,18 +317,26 @@ function BattleRoom({ id }: { id: string }) {
 
   const [showIntro, setShowIntro] = useState(true);
   const [showLostLeadAlert, setShowLostLeadAlert] = useState(false);
+  const [showRainbowCat, setShowRainbowCat] = useState(false);
   const [catVariant, setCatVariant] = useState<1 | 2>(1);
   const [alertText, setAlertText] = useState('Someone just passed you and took 1st place.');
 
-  const [voiceMessages, setVoiceMessages] = useState<VoiceMessage[]>([]);
-  const [voiceLoading, setVoiceLoading] = useState(true);
   const [voiceSending, setVoiceSending] = useState(false);
   const [recordingHeld, setRecordingHeld] = useState(false);
+  const [voicePlayingUser, setVoicePlayingUser] = useState<string | null>(null);
+
+  const [pulseSending, setPulseSending] = useState(false);
+  const [pulseHolding, setPulseHolding] = useState(false);
+  const [pulseIncomingUser, setPulseIncomingUser] = useState<string | null>(null);
+
+  const pulseHoldStartRef = useRef<number | null>(null);
 
   const prevLeaderUserIdRef = useRef<string | null>(null);
   const prevLeaderTeamIdRef = useRef<string | null>(null);
   const alertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activePlayerRef = useRef<any>(null);
+  const voicePlayingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pulseBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentLeaderPlayer = playerScores[0] ?? null;
   const currentLeaderUserId = currentLeaderPlayer?.userId ?? null;
@@ -346,44 +363,72 @@ function BattleRoom({ id }: { id: string }) {
     }, 2600);
   };
 
-  const stopActivePlayback = () => {
+  const stopActivePlayback = useCallback(() => {
     if (activePlayerRef.current) {
       try {
         activePlayerRef.current.pause();
       } catch {}
+
       try {
         activePlayerRef.current.remove();
       } catch {}
+
       activePlayerRef.current = null;
     }
-  };
+  }, []);
 
-  const playVoiceNote = async (msg: VoiceMessage) => {
-    if (!msg.signed_url) return;
+  const showPlayingIndicator = useCallback((username: string, durationMs: number) => {
+    if (voicePlayingTimerRef.current) clearTimeout(voicePlayingTimerRef.current);
 
-    try {
-      stopActivePlayback();
-      const player = createAudioPlayer(msg.signed_url);
-      activePlayerRef.current = player;
-      player.play();
-    } catch (e) {
-      console.warn('[voice] play error', e);
-    }
-  };
+    setVoicePlayingUser(username);
 
-  const loadVoiceMessages = useCallback(async () => {
-    try {
-      setVoiceLoading(true);
-      const rows = await fetchVoiceMessagesForPoster(id);
-      setVoiceMessages(rows);
-    } finally {
-      setVoiceLoading(false);
-    }
-  }, [id]);
+    voicePlayingTimerRef.current = setTimeout(() => {
+      setVoicePlayingUser(null);
+    }, durationMs + 600);
+  }, []);
+
+  const showPulseBanner = useCallback((username: string, totalDurationMs: number) => {
+    if (pulseBannerTimerRef.current) clearTimeout(pulseBannerTimerRef.current);
+
+    setPulseIncomingUser(username);
+
+    pulseBannerTimerRef.current = setTimeout(() => {
+      setPulseIncomingUser(null);
+    }, totalDurationMs + 800);
+  }, []);
+
+  const playVoiceNote = useCallback(
+    async (msg: VoiceMessage) => {
+      try {
+        const usableUrl =
+          msg.signed_url || (msg.storage_path ? await buildSignedVoiceUrl(msg.storage_path) : null);
+
+        if (!usableUrl) return;
+
+        await setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+          shouldDuckAndroid: true,
+        });
+
+        const newPlayer = createAudioPlayer({ uri: usableUrl });
+
+        stopActivePlayback();
+        activePlayerRef.current = newPlayer;
+
+        newPlayer.play();
+        showPlayingIndicator(msg.sender_username, msg.duration_ms);
+      } catch (e) {
+        console.warn('[voice] play error', e);
+      }
+    },
+    [showPlayingIndicator, stopActivePlayback]
+  );
 
   const startVoiceRecording = useCallback(async () => {
     try {
       const permission = await requestRecordingPermissionsAsync();
+
       if (!permission.granted) {
         console.warn('[voice] microphone permission denied');
         return;
@@ -396,6 +441,7 @@ function BattleRoom({ id }: { id: string }) {
 
       await recorder.prepareToRecordAsync();
       recorder.record({ forDuration: MAX_VOICE_SECONDS });
+
       setRecordingHeld(true);
       Vibration.vibrate(35);
     } catch (e) {
@@ -410,11 +456,9 @@ function BattleRoom({ id }: { id: string }) {
     try {
       setRecordingHeld(false);
 
-      if (!recorderState.isRecording) {
-        return;
+      if (recorderState.isRecording) {
+        await recorder.stop();
       }
-
-      await recorder.stop();
 
       const fileUri = recorder.uri ?? recorderState.url ?? null;
       const durationMs = recorderState.durationMillis ?? 0;
@@ -422,11 +466,14 @@ function BattleRoom({ id }: { id: string }) {
       await setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
+        shouldDuckAndroid: true,
       });
 
       if (!fileUri || durationMs < 400 || !user?.id || !user?.username) {
         return;
       }
+
+      Vibration.vibrate(30);
 
       setVoiceSending(true);
 
@@ -438,8 +485,7 @@ function BattleRoom({ id }: { id: string }) {
         durationMs,
       });
 
-      await loadVoiceMessages();
-      Vibration.vibrate(30);
+      console.log('[voice] sent voice message to poster:', id);
     } catch (e) {
       console.warn('[voice] stop/send error', e);
     } finally {
@@ -454,15 +500,52 @@ function BattleRoom({ id }: { id: string }) {
     user?.id,
     user?.username,
     id,
-    loadVoiceMessages,
   ]);
 
-  useEffect(() => {
-    loadVoiceMessages();
-  }, [loadVoiceMessages]);
+  const startPulseHold = useCallback(() => {
+    if (pulseSending) return;
+
+    pulseHoldStartRef.current = Date.now();
+    setPulseHolding(true);
+
+    Vibration.vibrate(20);
+  }, [pulseSending]);
+
+  const stopPulseHoldAndSend = useCallback(async () => {
+    if (!pulseHolding || !user?.id || !user?.username) return;
+
+    setPulseHolding(false);
+
+    const startedAt = pulseHoldStartRef.current;
+    pulseHoldStartRef.current = null;
+
+    if (!startedAt) return;
+
+    const heldMs = Date.now() - startedAt;
+    const pattern = buildPulsePatternFromHold(heldMs);
+
+    try {
+      setPulseSending(true);
+
+      await insertVibrationMessage({
+        posterId: id,
+        senderId: user.id,
+        senderUsername: user.username,
+        pattern,
+      });
+
+      console.log('[pulse] sent to poster room:', id, 'pattern:', pattern);
+
+      Vibration.vibrate(30);
+    } catch (e) {
+      console.warn('[pulse] send error', e);
+    } finally {
+      setPulseSending(false);
+    }
+  }, [pulseHolding, user?.id, user?.username, id]);
 
   useEffect(() => {
-    const channel = supabase
+    const voiceChannel = supabase
       .channel(`voice_messages:${id}`)
       .on(
         'postgres_changes',
@@ -472,17 +555,70 @@ function BattleRoom({ id }: { id: string }) {
           table: 'voice_messages',
           filter: `poster_id=eq.${id}`,
         },
-        async () => {
-          await loadVoiceMessages();
+        async (payload) => {
+          const row = payload.new as VoiceMessage;
+
+          if (row.sender_id === user?.id) return;
+
+          const signedUrl = await buildSignedVoiceUrl(row.storage_path);
+
+          if (signedUrl) {
+            const incoming: VoiceMessage = { ...row, signed_url: signedUrl };
+            console.log('[voice] incoming voice from:', row.sender_username, 'poster:', id);
+            await playVoiceNote(incoming);
+          }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[voice realtime] status:', status, 'poster:', id);
+      });
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(voiceChannel);
       stopActivePlayback();
     };
-  }, [id, loadVoiceMessages]);
+  }, [id, user?.id, playVoiceNote, stopActivePlayback]);
+
+  useEffect(() => {
+    const pulseChannel = supabase
+      .channel(`vibration_messages:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'vibration_messages',
+          filter: `poster_id=eq.${id}`,
+        },
+        (payload) => {
+          const row = payload.new as VibrationMessage;
+
+          console.log('[pulse] incoming row:', row);
+
+          if (row.sender_id === user?.id) {
+            console.log('[pulse] ignored own pulse');
+            return;
+          }
+
+          const pattern = Array.isArray(row.pattern)
+            ? row.pattern.map((x) => Number(x)).filter((x) => !Number.isNaN(x))
+            : [];
+
+          if (pattern.length > 0) {
+            console.log('[pulse] received from:', row.sender_username, 'poster:', id);
+            showPulseBanner(row.sender_username, row.total_duration_ms || 1200);
+            Vibration.vibrate(pattern);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('[pulse realtime] status:', status, 'poster:', id);
+      });
+
+    return () => {
+      supabase.removeChannel(pulseChannel);
+    };
+  }, [id, user?.id, showPulseBanner]);
 
   useEffect(() => {
     if (!myUserId || !currentLeaderUserId) {
@@ -497,8 +633,18 @@ function BattleRoom({ id }: { id: string }) {
       currentLeaderUserId !== myUserId &&
       currentLeaderUserId !== prevLeaderUserId;
 
+    // Nou: utilizatorul tocmai a ajuns pe locul 1
+    const iGainedPlayerLead =
+      prevLeaderUserId !== null &&        // nu la prima randare
+      prevLeaderUserId !== myUserId &&    // nu era lider înainte
+      currentLeaderUserId === myUserId;   // acum e lider
+
     if (iLostPlayerLead) {
       triggerLeadLostAlert('Someone just passed you and took 1st place.');
+    }
+
+    if (iGainedPlayerLead) {
+      setShowRainbowCat(true);
     }
 
     prevLeaderUserIdRef.current = currentLeaderUserId;
@@ -530,10 +676,21 @@ function BattleRoom({ id }: { id: string }) {
         clearTimeout(alertTimerRef.current);
         alertTimerRef.current = null;
       }
+
+      if (voicePlayingTimerRef.current) {
+        clearTimeout(voicePlayingTimerRef.current);
+        voicePlayingTimerRef.current = null;
+      }
+
+      if (pulseBannerTimerRef.current) {
+        clearTimeout(pulseBannerTimerRef.current);
+        pulseBannerTimerRef.current = null;
+      }
+
       Vibration.cancel();
       stopActivePlayback();
     };
-  }, []);
+  }, [stopActivePlayback]);
 
   if (error) {
     return (
@@ -555,8 +712,12 @@ function BattleRoom({ id }: { id: string }) {
     );
   }
 
-  const visibleUsers = onlineUsers.slice(0, 5);
-  const extraCount = Math.max(0, onlineUsers.length - 5);
+  const uniqueOnlineUsers = Array.from(
+    new Map(onlineUsers.map((u) => [u.userId, u])).values()
+  );
+
+  const visibleUsers = uniqueOnlineUsers.slice(0, 5);
+  const extraCount = Math.max(0, uniqueOnlineUsers.length - 5);
 
   return (
     <View style={styles.screen}>
@@ -564,6 +725,13 @@ function BattleRoom({ id }: { id: string }) {
         <SwordBattleIntro
           source={SWORD_BATTLE}
           onDone={() => setShowIntro(false)}
+        />
+      )}
+
+      {showRainbowCat && (
+        <RainbowCatPopup
+          source={BLACK_RAINBOW_CAT}
+          onDone={() => setShowRainbowCat(false)}
         />
       )}
 
@@ -578,30 +746,34 @@ function BattleRoom({ id }: { id: string }) {
         <TouchableOpacity onPress={() => router.back()} style={styles.hudClose}>
           <Text style={styles.hudCloseText}>✕</Text>
         </TouchableOpacity>
+
         <View style={styles.hudCenter}>
           <Text style={styles.hudTitle} numberOfLines={1}>
             {poster.name}
           </Text>
         </View>
+
         <LiveIndicator connected={wsConnected} style={styles.liveIndicator} />
       </View>
 
-      {onlineUsers.length > 0 && (
+      {uniqueOnlineUsers.length > 0 && (
         <View style={styles.presenceBand}>
           <Text style={styles.presenceLabel}>ONLINE NOW</Text>
+
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.avatarRow}
           >
-            {visibleUsers.map((u) => (
-              <View key={u.userId} style={styles.avatarWrap}>
+            {visibleUsers.map((u, index) => (
+              <View key={`${u.userId}-${index}`} style={styles.avatarWrap}>
                 <UserAvatar user={u} />
                 <Text style={styles.avatarName} numberOfLines={1}>
                   {u.username}
                 </Text>
               </View>
             ))}
+
             {extraCount > 0 && (
               <View style={[styles.avatar, styles.avatarExtra]}>
                 <Text style={styles.avatarExtraText}>+{extraCount}</Text>
@@ -611,19 +783,23 @@ function BattleRoom({ id }: { id: string }) {
         </View>
       )}
 
+      <PosterAnchorView
+        poster={poster}
+        layers={isLoadingLayers ? [] : layers}
+        glitching={showLostLeadAlert}
+      />
+
       <ScrollView
-        style={styles.scrollArea}
-        contentContainerStyle={styles.scrollContent}
+        style={styles.lowerScrollArea}
+        contentContainerStyle={styles.lowerScrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <PosterAnchorView poster={poster} layers={isLoadingLayers ? [] : layers} />
-
         <View style={styles.panelWrap}>
           <LeaderboardPanel myTeamId={myTeamId} />
           <TerritoryPanel
             territory={poster.territory}
             wsConnected={wsConnected}
-            recentContributorUsernames={onlineUsers.map((u) => u.username)}
+            recentContributorUsernames={uniqueOnlineUsers.map((u) => u.username)}
           />
         </View>
 
@@ -648,52 +824,58 @@ function BattleRoom({ id }: { id: string }) {
             ]}
             onPressIn={startVoiceRecording}
             onPressOut={stopVoiceRecordingAndSend}
-            disabled={voiceSending}
+            disabled={voiceSending || pulseSending}
           >
             <Text style={styles.voiceRecordBtnText}>
               {voiceSending
                 ? 'SENDING...'
                 : recordingHeld
-                ? 'RECORDING... RELEASE TO SEND'
+                ? '● REC — RELEASE TO SEND'
                 : 'HOLD TO TALK'}
             </Text>
           </TouchableOpacity>
 
-          {voiceLoading ? (
-            <ActivityIndicator color={Colors.accentCyan} style={{ marginTop: 10 }} />
-          ) : voiceMessages.length > 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.voiceList}
-            >
-              {voiceMessages.map((msg) => {
-                const mine = msg.sender_id === user?.id;
-                return (
-                  <TouchableOpacity
-                    key={msg.id}
-                    style={[
-                      styles.voiceChip,
-                      mine && styles.voiceChipMine,
-                    ]}
-                    activeOpacity={0.85}
-                    onPress={() => playVoiceNote(msg)}
-                  >
-                    <Text style={styles.voiceChipUser} numberOfLines={1}>
-                      {mine ? 'YOU' : msg.sender_username}
-                    </Text>
-                    <Text style={styles.voiceChipMeta}>
-                      ▶ {formatVoiceDuration(msg.duration_ms)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          ) : (
-            <Text style={styles.voiceEmpty}>
-              No voice notes yet on this poster.
+          {voicePlayingUser ? (
+            <View style={styles.voicePlayingBanner}>
+              <Text style={styles.voicePlayingText}>
+                ▶ {voicePlayingUser === user?.username ? 'YOU' : voicePlayingUser}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.pulsePanel}>
+          <View style={styles.voiceHeader}>
+            <Text style={styles.pulseTitle}>LIVE PULSE</Text>
+            <Text style={styles.voiceHint}>Hold to send vibration signal</Text>
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={[
+              styles.pulseBtn,
+              pulseHolding && styles.pulseBtnActive,
+            ]}
+            onPressIn={startPulseHold}
+            onPressOut={stopPulseHoldAndSend}
+            disabled={pulseSending || voiceSending}
+          >
+            <Text style={styles.pulseBtnText}>
+              {pulseSending
+                ? 'SENDING PULSE...'
+                : pulseHolding
+                ? '~ HOLDING PULSE ~ RELEASE TO SEND'
+                : 'HOLD TO SEND PULSE'}
             </Text>
-          )}
+          </TouchableOpacity>
+
+          {pulseIncomingUser ? (
+            <View style={styles.pulseIncomingBanner}>
+              <Text style={styles.pulseIncomingText}>
+                ≋ PULSE FROM {pulseIncomingUser.toUpperCase()}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.bottomSpacer} />
@@ -704,13 +886,12 @@ function BattleRoom({ id }: { id: string }) {
   );
 }
 
-// ─── Stiluri ──────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.bg,
   },
+
   center: {
     flex: 1,
     backgroundColor: Colors.bg,
@@ -718,21 +899,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing[4],
   },
+
   loadingText: {
     color: Colors.textSecondary,
     fontSize: Typography.fontSizes.sm,
     letterSpacing: Typography.letterSpacing.wide,
     textTransform: 'uppercase',
   },
+
   errorText: {
     color: Colors.error,
     fontSize: Typography.fontSizes.base,
     textAlign: 'center',
     paddingHorizontal: Spacing[6],
   },
+
   backBtn: {
     marginTop: Spacing[3],
   },
+
   backText: {
     color: Colors.textSecondary,
     fontSize: Typography.fontSizes.base,
@@ -744,13 +929,16 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingHorizontal: Spacing[5],
   },
+
   gateBack: {
     marginBottom: Spacing[4],
   },
+
   gateBackText: {
     color: Colors.textSecondary,
     fontSize: Typography.fontSizes.base,
   },
+
   gateContent: {
     flex: 1,
     alignItems: 'center',
@@ -758,9 +946,11 @@ const styles = StyleSheet.create({
     gap: Spacing[4],
     paddingBottom: Spacing[16],
   },
+
   gateIcon: {
     fontSize: 56,
   },
+
   gateTitle: {
     fontSize: Typography.fontSizes['2xl'],
     fontWeight: Typography.fontWeights.black,
@@ -769,6 +959,7 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.wide,
     lineHeight: Typography.fontSizes['2xl'] * 1.3,
   },
+
   gateDesc: {
     fontSize: Typography.fontSizes.base,
     color: Colors.textSecondary,
@@ -776,13 +967,16 @@ const styles = StyleSheet.create({
     lineHeight: Typography.fontSizes.base * 1.6,
     maxWidth: 280,
   },
+
   gateBtn: {
     marginTop: Spacing[2],
     paddingHorizontal: Spacing[8],
   },
+
   gateCancel: {
     paddingVertical: Spacing[2],
   },
+
   gateCancelText: {
     color: Colors.textMuted,
     fontSize: Typography.fontSizes.sm,
@@ -799,19 +993,23 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
     gap: Spacing[3],
   },
+
   hudClose: {
     width: 32,
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   hudCloseText: {
     color: Colors.textMuted,
     fontSize: Typography.fontSizes.lg,
   },
+
   hudCenter: {
     flex: 1,
   },
+
   hudTitle: {
     color: Colors.textPrimary,
     fontSize: Typography.fontSizes.base,
@@ -819,6 +1017,7 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.wider,
     textTransform: 'uppercase',
   },
+
   liveIndicator: {
     flexShrink: 0,
   },
@@ -833,6 +1032,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
     gap: Spacing[3],
   },
+
   presenceLabel: {
     fontSize: Typography.fontSizes.xs,
     fontWeight: Typography.fontWeights.black,
@@ -843,15 +1043,18 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 6,
   },
+
   avatarRow: {
     flexDirection: 'row',
     gap: Spacing[3],
     alignItems: 'center',
   },
+
   avatarWrap: {
     alignItems: 'center',
     gap: 2,
   },
+
   avatar: {
     width: 36,
     height: 36,
@@ -865,10 +1068,12 @@ const styles = StyleSheet.create({
     elevation: 4,
     overflow: 'hidden',
   },
+
   avatarBadge: {
     width: 34,
     height: 34,
   },
+
   avatarName: {
     fontSize: 9,
     color: Colors.textMuted,
@@ -877,21 +1082,24 @@ const styles = StyleSheet.create({
     maxWidth: 36,
     textAlign: 'center',
   },
+
   avatarExtra: {
     backgroundColor: Colors.bgCard,
     borderColor: Colors.borderBright,
     borderWidth: 1.5,
   },
+
   avatarExtraText: {
     fontSize: Typography.fontSizes.xs,
     fontWeight: Typography.fontWeights.black,
     color: Colors.textMuted,
   },
 
-  scrollArea: {
+  lowerScrollArea: {
     flex: 1,
   },
-  scrollContent: {
+
+  lowerScrollContent: {
     paddingBottom: 0,
   },
 
@@ -900,6 +1108,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing[3],
     gap: Spacing[3],
   },
+
   toolOptions: {
     minHeight: 0,
     paddingHorizontal: Spacing[4],
@@ -911,21 +1120,25 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing[3],
     gap: Spacing[2],
   },
+
   voiceHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+
   voiceTitle: {
     color: Colors.accentCyan,
     fontSize: Typography.fontSizes.xs,
     fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.widest,
   },
+
   voiceHint: {
     color: Colors.textMuted,
     fontSize: Typography.fontSizes.xs,
   },
+
   voiceRecordBtn: {
     backgroundColor: '#10232a',
     borderWidth: 1,
@@ -935,47 +1148,93 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   voiceRecordBtnActive: {
     backgroundColor: '#35101b',
     borderColor: Colors.accentPink,
   },
+
   voiceRecordBtnText: {
     color: Colors.white,
     fontSize: Typography.fontSizes.sm,
     fontWeight: Typography.fontWeights.black,
     letterSpacing: Typography.letterSpacing.wide,
   },
-  voiceList: {
-    gap: Spacing[2],
-    paddingTop: Spacing[1],
-  },
-  voiceChip: {
-    minWidth: 120,
-    backgroundColor: Colors.bgSurface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.full,
+
+  voicePlayingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing[2],
     paddingHorizontal: Spacing[3],
     paddingVertical: Spacing[2],
-  },
-  voiceChipMine: {
-    borderColor: Colors.accentCyan,
     backgroundColor: 'rgba(0,229,255,0.08)',
+    borderWidth: 1,
+    borderColor: Colors.accentCyan,
+    borderRadius: Radius.full,
+    alignSelf: 'flex-start',
   },
-  voiceChipUser: {
-    color: Colors.textPrimary,
+
+  voicePlayingText: {
+    color: Colors.accentCyan,
     fontSize: Typography.fontSizes.xs,
     fontWeight: Typography.fontWeights.black,
-    marginBottom: 2,
+    letterSpacing: Typography.letterSpacing.wide,
   },
-  voiceChipMeta: {
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSizes.xs,
+
+  pulsePanel: {
+    paddingHorizontal: Spacing[4],
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
+    gap: Spacing[2],
   },
-  voiceEmpty: {
-    color: Colors.textMuted,
+
+  pulseTitle: {
+    color: Colors.accentPink,
     fontSize: Typography.fontSizes.xs,
-    marginTop: Spacing[1],
+    fontWeight: Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.widest,
+  },
+
+  pulseBtn: {
+    backgroundColor: 'rgba(255,46,110,0.10)',
+    borderWidth: 1,
+    borderColor: Colors.accentPink,
+    borderRadius: Radius.full,
+    paddingVertical: Spacing[3],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  pulseBtnActive: {
+    backgroundColor: 'rgba(255,46,110,0.22)',
+    transform: [{ scale: 0.99 }],
+  },
+
+  pulseBtnText: {
+    color: Colors.white,
+    fontSize: Typography.fontSizes.sm,
+    fontWeight: Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.wide,
+  },
+
+  pulseIncomingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing[2],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    backgroundColor: 'rgba(255,46,110,0.10)',
+    borderWidth: 1,
+    borderColor: Colors.accentPink,
+    borderRadius: Radius.full,
+    alignSelf: 'flex-start',
+  },
+
+  pulseIncomingText: {
+    color: Colors.accentPink,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.wide,
   },
 
   bottomSpacer: {
