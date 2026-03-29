@@ -2,19 +2,15 @@
  * app/poster/[id].tsx
  * Camera poster — arena de battle live.
  *
- * SCAN GATE: Un utilizator poate deschide un poster DOAR dacă l-a scanat
- * în prealabil (are o înregistrare matched=true în poster_scans).
- * Dacă nu → ecran "Scan this poster first" cu buton către scanner.
- *
- * Layout după gate:
- *   [HUD top: poster name + utilizatori online + status live]
- *   [PosterAnchorView — imaginea reală ca canvas + SVG mural overlay]
- *   [Territory panel — colapsabil]
- *   [Tool options row: color picker / sticker picker]
- *   [Bottom toolbar: mural tools]
+ * Added:
+ * - live voice notes per poster room
+ * - hold-to-record / release-to-send
+ * - upload to Supabase Storage
+ * - realtime sync from voice_messages
+ * - vertical scroll for poster content
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -27,6 +23,16 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import {
+  createAudioPlayer,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+  useAudioRecorderState,
+  RecordingPresets,
+} from 'expo-audio';
+
+import { supabase } from '../../src/lib/supabase';
 import { usePosterRoom } from '../../src/hooks/usePosterRoom';
 import { useMuralToolStore } from '../../src/stores/muralToolStore';
 import { useVaultStore } from '../../src/stores/vaultStore';
@@ -45,17 +51,110 @@ import { StickerPicker } from '../../src/components/mural/StickerPicker';
 import { LiveIndicator } from '../../src/components/ui/LiveIndicator';
 import { Button } from '../../src/components/ui/Button';
 
-import { Colors, Spacing, Typography } from '../../src/theme';
+import { Colors, Spacing, Typography, Radius } from '../../src/theme';
 import { TEAM_COLORS } from '../../src/theme/colors';
 import { TeamId } from '../../src/types/team';
 import { OnlineUser } from '../../src/services/wsService';
 import { TEAM_BADGE_IMAGES } from '../../src/constants/badges';
 
-// ─── Assets alertă ────────────────────────────────────────────────────────────
+// ─── Assets ───────────────────────────────────────────────────────────────────
 
-const CAT_ALERT_1    = require('../_layout/cat1.png');
-const CAT_ALERT_2    = require('../_layout/cat2.png');
-const SWORD_BATTLE   = require('../_layout/Sword Battle.json');
+const CAT_ALERT_1 = require('../_layout/cat1.png');
+const CAT_ALERT_2 = require('../_layout/cat2.png');
+const SWORD_BATTLE = require('../_layout/Sword Battle.json');
+
+// ─── Voice constants ──────────────────────────────────────────────────────────
+
+const VOICE_BUCKET = 'poster-voice';
+const MAX_VOICE_SECONDS = 15;
+const TOOLBAR_BOTTOM_SPACE = 120;
+
+// ─── Voice types/helpers ──────────────────────────────────────────────────────
+
+type VoiceMessage = {
+  id: string;
+  poster_id: string;
+  sender_id: string;
+  sender_username: string;
+  storage_path: string;
+  duration_ms: number;
+  created_at: string;
+  signed_url?: string | null;
+};
+
+function formatVoiceDuration(ms: number) {
+  const totalSec = Math.max(1, Math.round(ms / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+async function buildSignedVoiceUrl(storagePath: string) {
+  const { data, error } = await supabase.storage
+    .from(VOICE_BUCKET)
+    .createSignedUrl(storagePath, 60 * 60);
+
+  if (error) return null;
+  return data?.signedUrl ?? null;
+}
+
+async function fetchVoiceMessagesForPoster(posterId: string): Promise<VoiceMessage[]> {
+  const { data, error } = await supabase
+    .from('voice_messages')
+    .select('*')
+    .eq('poster_id', posterId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error || !data) return [];
+
+  const withUrls = await Promise.all(
+    data.map(async (row) => ({
+      ...row,
+      signed_url: await buildSignedVoiceUrl(row.storage_path),
+    }))
+  );
+
+  return withUrls;
+}
+
+async function uploadVoiceMessage(params: {
+  posterId: string;
+  senderId: string;
+  senderUsername: string;
+  fileUri: string;
+  durationMs: number;
+}) {
+  const { posterId, senderId, senderUsername, fileUri, durationMs } = params;
+
+  const fileExt = fileUri.split('.').pop() || 'm4a';
+  const fileName = `${Date.now()}.${fileExt}`;
+  const storagePath = `${posterId}/${senderId}/${fileName}`;
+
+  const response = await fetch(fileUri);
+  const blob = await response.blob();
+
+  const { error: uploadError } = await supabase.storage
+    .from(VOICE_BUCKET)
+    .upload(storagePath, blob, {
+      contentType: 'audio/mp4',
+      upsert: false,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { error: insertError } = await supabase
+    .from('voice_messages')
+    .insert({
+      poster_id: posterId,
+      sender_id: senderId,
+      sender_username: senderUsername,
+      storage_path: storagePath,
+      duration_ms: durationMs,
+    });
+
+  if (insertError) throw insertError;
+}
 
 // ─── Avatar utilizator online ─────────────────────────────────────────────────
 
@@ -204,14 +303,23 @@ function BattleRoom({ id }: { id: string }) {
   const playerScores = usePosterStore((s) => s.playerScores);
   const teamScores = usePosterStore((s) => s.teamScores);
 
-  const [showIntro, setShowIntro]             = useState(true);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder);
+
+  const [showIntro, setShowIntro] = useState(true);
   const [showLostLeadAlert, setShowLostLeadAlert] = useState(false);
-  const [catVariant, setCatVariant]           = useState<1 | 2>(1);
-  const [alertText, setAlertText]             = useState('Someone just passed you and took 1st place.');
+  const [catVariant, setCatVariant] = useState<1 | 2>(1);
+  const [alertText, setAlertText] = useState('Someone just passed you and took 1st place.');
+
+  const [voiceMessages, setVoiceMessages] = useState<VoiceMessage[]>([]);
+  const [voiceLoading, setVoiceLoading] = useState(true);
+  const [voiceSending, setVoiceSending] = useState(false);
+  const [recordingHeld, setRecordingHeld] = useState(false);
 
   const prevLeaderUserIdRef = useRef<string | null>(null);
   const prevLeaderTeamIdRef = useRef<string | null>(null);
   const alertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activePlayerRef = useRef<any>(null);
 
   const currentLeaderPlayer = playerScores[0] ?? null;
   const currentLeaderUserId = currentLeaderPlayer?.userId ?? null;
@@ -237,6 +345,144 @@ function BattleRoom({ id }: { id: string }) {
       setShowLostLeadAlert(false);
     }, 2600);
   };
+
+  const stopActivePlayback = () => {
+    if (activePlayerRef.current) {
+      try {
+        activePlayerRef.current.pause();
+      } catch {}
+      try {
+        activePlayerRef.current.remove();
+      } catch {}
+      activePlayerRef.current = null;
+    }
+  };
+
+  const playVoiceNote = async (msg: VoiceMessage) => {
+    if (!msg.signed_url) return;
+
+    try {
+      stopActivePlayback();
+      const player = createAudioPlayer(msg.signed_url);
+      activePlayerRef.current = player;
+      player.play();
+    } catch (e) {
+      console.warn('[voice] play error', e);
+    }
+  };
+
+  const loadVoiceMessages = useCallback(async () => {
+    try {
+      setVoiceLoading(true);
+      const rows = await fetchVoiceMessagesForPoster(id);
+      setVoiceMessages(rows);
+    } finally {
+      setVoiceLoading(false);
+    }
+  }, [id]);
+
+  const startVoiceRecording = useCallback(async () => {
+    try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        console.warn('[voice] microphone permission denied');
+        return;
+      }
+
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+
+      await recorder.prepareToRecordAsync();
+      recorder.record({ forDuration: MAX_VOICE_SECONDS });
+      setRecordingHeld(true);
+      Vibration.vibrate(35);
+    } catch (e) {
+      console.warn('[voice] start record error', e);
+      setRecordingHeld(false);
+    }
+  }, [recorder]);
+
+  const stopVoiceRecordingAndSend = useCallback(async () => {
+    if (!recordingHeld) return;
+
+    try {
+      setRecordingHeld(false);
+
+      if (!recorderState.isRecording) {
+        return;
+      }
+
+      await recorder.stop();
+
+      const fileUri = recorder.uri ?? recorderState.url ?? null;
+      const durationMs = recorderState.durationMillis ?? 0;
+
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      });
+
+      if (!fileUri || durationMs < 400 || !user?.id || !user?.username) {
+        return;
+      }
+
+      setVoiceSending(true);
+
+      await uploadVoiceMessage({
+        posterId: id,
+        senderId: user.id,
+        senderUsername: user.username,
+        fileUri,
+        durationMs,
+      });
+
+      await loadVoiceMessages();
+      Vibration.vibrate(30);
+    } catch (e) {
+      console.warn('[voice] stop/send error', e);
+    } finally {
+      setVoiceSending(false);
+    }
+  }, [
+    recordingHeld,
+    recorder,
+    recorderState.isRecording,
+    recorderState.durationMillis,
+    recorderState.url,
+    user?.id,
+    user?.username,
+    id,
+    loadVoiceMessages,
+  ]);
+
+  useEffect(() => {
+    loadVoiceMessages();
+  }, [loadVoiceMessages]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`voice_messages:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'voice_messages',
+          filter: `poster_id=eq.${id}`,
+        },
+        async () => {
+          await loadVoiceMessages();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      stopActivePlayback();
+    };
+  }, [id, loadVoiceMessages]);
 
   useEffect(() => {
     if (!myUserId || !currentLeaderUserId) {
@@ -285,6 +531,7 @@ function BattleRoom({ id }: { id: string }) {
         alertTimerRef.current = null;
       }
       Vibration.cancel();
+      stopActivePlayback();
     };
   }, []);
 
@@ -313,7 +560,6 @@ function BattleRoom({ id }: { id: string }) {
 
   return (
     <View style={styles.screen}>
-      {/* ── Intro animație sword battle — joacă o singură dată la intrare ── */}
       {showIntro && (
         <SwordBattleIntro
           source={SWORD_BATTLE}
@@ -365,23 +611,93 @@ function BattleRoom({ id }: { id: string }) {
         </View>
       )}
 
-      <PosterAnchorView poster={poster} layers={isLoadingLayers ? [] : layers} />
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <PosterAnchorView poster={poster} layers={isLoadingLayers ? [] : layers} />
 
-      <View style={styles.panelWrap}>
-        <LeaderboardPanel myTeamId={myTeamId} />
-        <TerritoryPanel
-          territory={poster.territory}
-          wsConnected={wsConnected}
-          recentContributorUsernames={onlineUsers.map((u) => u.username)}
-        />
-      </View>
+        <View style={styles.panelWrap}>
+          <LeaderboardPanel myTeamId={myTeamId} />
+          <TerritoryPanel
+            territory={poster.territory}
+            wsConnected={wsConnected}
+            recentContributorUsernames={onlineUsers.map((u) => u.username)}
+          />
+        </View>
 
-      <View style={styles.toolOptions}>
-        {(activeTool === 'brush' || activeTool === 'spray' || activeTool === 'glow') && (
-          <ColorPicker />
-        )}
-        {activeTool === 'sticker' && <StickerPicker />}
-      </View>
+        <View style={styles.toolOptions}>
+          {(activeTool === 'brush' || activeTool === 'spray' || activeTool === 'glow') && (
+            <ColorPicker />
+          )}
+          {activeTool === 'sticker' && <StickerPicker />}
+        </View>
+
+        <View style={styles.voicePanel}>
+          <View style={styles.voiceHeader}>
+            <Text style={styles.voiceTitle}>LIVE VOICE</Text>
+            <Text style={styles.voiceHint}>Hold to record • release to send</Text>
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={[
+              styles.voiceRecordBtn,
+              recordingHeld && styles.voiceRecordBtnActive,
+            ]}
+            onPressIn={startVoiceRecording}
+            onPressOut={stopVoiceRecordingAndSend}
+            disabled={voiceSending}
+          >
+            <Text style={styles.voiceRecordBtnText}>
+              {voiceSending
+                ? 'SENDING...'
+                : recordingHeld
+                ? 'RECORDING... RELEASE TO SEND'
+                : 'HOLD TO TALK'}
+            </Text>
+          </TouchableOpacity>
+
+          {voiceLoading ? (
+            <ActivityIndicator color={Colors.accentCyan} style={{ marginTop: 10 }} />
+          ) : voiceMessages.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.voiceList}
+            >
+              {voiceMessages.map((msg) => {
+                const mine = msg.sender_id === user?.id;
+                return (
+                  <TouchableOpacity
+                    key={msg.id}
+                    style={[
+                      styles.voiceChip,
+                      mine && styles.voiceChipMine,
+                    ]}
+                    activeOpacity={0.85}
+                    onPress={() => playVoiceNote(msg)}
+                  >
+                    <Text style={styles.voiceChipUser} numberOfLines={1}>
+                      {mine ? 'YOU' : msg.sender_username}
+                    </Text>
+                    <Text style={styles.voiceChipMeta}>
+                      ▶ {formatVoiceDuration(msg.duration_ms)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <Text style={styles.voiceEmpty}>
+              No voice notes yet on this poster.
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
 
       <MuralToolbar />
     </View>
@@ -572,6 +888,13 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
+  scrollArea: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 0,
+  },
+
   panelWrap: {
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[3],
@@ -579,5 +902,83 @@ const styles = StyleSheet.create({
   },
   toolOptions: {
     minHeight: 0,
+    paddingHorizontal: Spacing[4],
+  },
+
+  voicePanel: {
+    paddingHorizontal: Spacing[4],
+    paddingTop: Spacing[3],
+    paddingBottom: Spacing[3],
+    gap: Spacing[2],
+  },
+  voiceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  voiceTitle: {
+    color: Colors.accentCyan,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.widest,
+  },
+  voiceHint: {
+    color: Colors.textMuted,
+    fontSize: Typography.fontSizes.xs,
+  },
+  voiceRecordBtn: {
+    backgroundColor: '#10232a',
+    borderWidth: 1,
+    borderColor: Colors.accentCyan,
+    borderRadius: 999,
+    paddingVertical: Spacing[3],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voiceRecordBtnActive: {
+    backgroundColor: '#35101b',
+    borderColor: Colors.accentPink,
+  },
+  voiceRecordBtnText: {
+    color: Colors.white,
+    fontSize: Typography.fontSizes.sm,
+    fontWeight: Typography.fontWeights.black,
+    letterSpacing: Typography.letterSpacing.wide,
+  },
+  voiceList: {
+    gap: Spacing[2],
+    paddingTop: Spacing[1],
+  },
+  voiceChip: {
+    minWidth: 120,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+  },
+  voiceChipMine: {
+    borderColor: Colors.accentCyan,
+    backgroundColor: 'rgba(0,229,255,0.08)',
+  },
+  voiceChipUser: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSizes.xs,
+    fontWeight: Typography.fontWeights.black,
+    marginBottom: 2,
+  },
+  voiceChipMeta: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSizes.xs,
+  },
+  voiceEmpty: {
+    color: Colors.textMuted,
+    fontSize: Typography.fontSizes.xs,
+    marginTop: Spacing[1],
+  },
+
+  bottomSpacer: {
+    height: TOOLBAR_BOTTOM_SPACE,
   },
 });
